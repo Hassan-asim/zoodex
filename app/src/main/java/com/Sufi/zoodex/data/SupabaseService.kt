@@ -62,7 +62,7 @@ object SupabaseService {
     suspend fun fetchFriendsForCallsign(myCallsign: String): List<OperativeProfile> {
         return try {
             val response = makeRequest(
-                url = "$SUPABASE_URL/friendships?requester_callsign=eq.$myCallsign&status=eq.accepted",
+                url = "$SUPABASE_URL/friendships?or=(requester_callsign.eq.$myCallsign,friend_callsign.eq.$myCallsign)&status=eq.accepted",
                 method = "GET"
             )
             
@@ -71,8 +71,10 @@ object SupabaseService {
                 val array = JSONArray(response)
                 for (i in 0 until array.length()) {
                     val obj = array.getJSONObject(i)
+                    val reqCallsign = obj.getString("requester_callsign")
                     val friendCallsign = obj.getString("friend_callsign")
-                    val profile = fetchProfileByCallsign(friendCallsign)
+                    val otherParty = if (reqCallsign.uppercase() == myCallsign.uppercase()) friendCallsign else reqCallsign
+                    val profile = fetchProfileByCallsign(otherParty)
                     if (profile != null) result.add(profile)
                 }
             }
@@ -199,6 +201,66 @@ object SupabaseService {
             result != null
         } catch (e: Exception) {
             Log.e(TAG, "Error adding friend: ${e.message}")
+            false
+        }
+    }
+
+    // Fetch pending incoming friend requests
+    suspend fun fetchPendingRequests(myCallsign: String): List<OperativeProfile> {
+        return try {
+            val response = makeRequest(
+                url = "$SUPABASE_URL/friendships?friend_callsign=eq.$myCallsign&status=eq.pending",
+                method = "GET"
+            )
+            
+            val result = mutableListOf<OperativeProfile>()
+            if (response != null) {
+                val array = JSONArray(response)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val requesterCallsign = obj.getString("requester_callsign")
+                    val profile = fetchProfileByCallsign(requesterCallsign)
+                    if (profile != null) result.add(profile)
+                }
+            }
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching pending requests: ${e.message}")
+            emptyList()
+        }
+    }
+
+    // Accept friend request
+    suspend fun acceptFriendRequest(requesterCallsign: String, myCallsign: String): Boolean {
+        return try {
+            val updateData = JSONObject().apply {
+                put("status", "accepted")
+            }
+            
+            val result = makeRequest(
+                url = "$SUPABASE_URL/friendships?requester_callsign=eq.$requesterCallsign&friend_callsign=eq.$myCallsign",
+                method = "PATCH",
+                body = updateData.toString()
+            )
+            Log.d(TAG, "Friend request accepted: $result")
+            result != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error accepting friend request: ${e.message}")
+            false
+        }
+    }
+
+    // Delete/Reject friend request or friendship
+    suspend fun deleteFriendship(requesterCallsign: String, friendCallsign: String): Boolean {
+        return try {
+            val result = makeRequest(
+                url = "$SUPABASE_URL/friendships?or=(and(requester_callsign.eq.$requesterCallsign,friend_callsign.eq.$friendCallsign),and(requester_callsign.eq.$friendCallsign,friend_callsign.eq.$requesterCallsign))",
+                method = "DELETE"
+            )
+            Log.d(TAG, "Friendship deleted/rejected: $result")
+            result != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting friendship: ${e.message}")
             false
         }
     }

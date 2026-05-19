@@ -33,24 +33,33 @@ fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
 
     // State management
     val friends = remember { mutableStateListOf<OperativeProfile>() }
+    val pendingRequests = remember { mutableStateListOf<OperativeProfile>() }
     var isLoading by remember { mutableStateOf(true) }
     var selectedFriend by remember { mutableStateOf<OperativeProfile?>(null) }
 
-    // Load friends on launch
-    LaunchedEffect(Unit) {
-        GameState.init(context)
+    fun refreshFriendsList() {
         scope.launch {
             isLoading = true
             try {
                 val loadedFriends = SupabaseService.fetchFriendsForCallsign(GameState.callsign)
                 friends.clear()
                 friends.addAll(loadedFriends)
-                Log.d("CommsScreen", "Loaded ${friends.size} friends")
+                
+                val loadedPending = SupabaseService.fetchPendingRequests(GameState.callsign)
+                pendingRequests.clear()
+                pendingRequests.addAll(loadedPending)
+                Log.d("CommsScreen", "Loaded ${friends.size} friends and ${pendingRequests.size} pending requests")
             } catch (e: Exception) {
                 Log.e("CommsScreen", "Error loading friends: ${e.message}")
             }
             isLoading = false
         }
+    }
+
+    // Load friends on launch
+    LaunchedEffect(Unit) {
+        GameState.init(context)
+        refreshFriendsList()
     }
 
     if (selectedFriend != null) {
@@ -107,7 +116,12 @@ fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> MessagesTab(friends, { selectedFriend = it })
-                    1 -> FriendsTab(friends, { selectedFriend = it })
+                    1 -> FriendsTab(
+                        friends = friends,
+                        pendingRequests = pendingRequests,
+                        onRefresh = { refreshFriendsList() },
+                        onSelectFriend = { selectedFriend = it }
+                    )
                 }
             }
         }
@@ -209,6 +223,8 @@ fun FriendChatPreview(friend: OperativeProfile, onClick: () -> Unit) {
 @Composable
 fun FriendsTab(
     friends: List<OperativeProfile>,
+    pendingRequests: List<OperativeProfile>,
+    onRefresh: () -> Unit,
     onSelectFriend: (OperativeProfile) -> Unit
 ) {
     var addFriendCode by remember { mutableStateOf("") }
@@ -217,7 +233,7 @@ fun FriendsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val myCode = "ZOODEX-" + GameState.faction.take(3).uppercase() + "-${GameState.playerLevel}9B"
+    val myCode = "ZOODEX-" + GameState.callsign.uppercase() + "-" + GameState.faction.take(3).uppercase()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -251,7 +267,7 @@ fun FriendsTab(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "📋 Tap to copy & share with other operatives",
+                        text = "📋 Share with other operatives to connect",
                         style = MaterialTheme.typography.labelSmall,
                         color = ObsidianBlack.copy(0.7f),
                         fontSize = 8.sp
@@ -280,7 +296,7 @@ fun FriendsTab(
                     OutlinedTextField(
                         value = addFriendCode,
                         onValueChange = { addFriendCode = it.uppercase() },
-                        placeholder = { Text("e.g. ZOODEX-NEO-229B", color = TextTertiary, fontSize = 11.sp) },
+                        placeholder = { Text("e.g. ZOODEX-CALLSIGN-FAC", color = TextTertiary, fontSize = 11.sp) },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontSize = 12.sp),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
@@ -300,15 +316,26 @@ fun FriendsTab(
                                 if (addFriendCode.isNotBlank()) {
                                     isAdding = true
                                     try {
-                                        val callsignFromCode = addFriendCode.split("-").getOrNull(1) ?: ""
-                                        val success = SupabaseService.addFriend(GameState.callsign, callsignFromCode)
-                                        statusMessage = if (success) "✓ Friend request sent!" else "✗ Failed to add friend"
+                                        val parts = addFriendCode.split("-")
+                                        val callsignFromCode = parts.getOrNull(1) ?: ""
+                                        
+                                        if (callsignFromCode.isBlank()) {
+                                            statusMessage = "✗ Invalid code format"
+                                        } else if (callsignFromCode.uppercase() == GameState.callsign.uppercase()) {
+                                            statusMessage = "✗ Cannot add yourself"
+                                        } else {
+                                            val success = SupabaseService.addFriend(GameState.callsign, callsignFromCode)
+                                            statusMessage = if (success) "✓ Friend request sent!" else "✗ Failed to add friend"
+                                            if (success) {
+                                                onRefresh()
+                                            }
+                                        }
                                     } catch (e: Exception) {
                                         statusMessage = "✗ Error: ${e.message}"
                                     }
                                     isAdding = false
                                     addFriendCode = ""
-                                    delay(2000)
+                                    delay(2500)
                                     statusMessage = ""
                                 }
                             }
@@ -329,6 +356,86 @@ fun FriendsTab(
                 if (statusMessage.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(statusMessage, fontSize = 10.sp, color = if (statusMessage.contains("✓")) AppleGreen else AppleRed, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Pending Incoming Requests Section
+        if (pendingRequests.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "INCOMING PENDING REQUESTS [${pendingRequests.size}]",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AppleBlue,
+                    fontSize = 9.sp,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            items(pendingRequests) { requester ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = GlassSurface,
+                    border = BorderStroke(1.dp, AppleBlue.copy(0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = requester.callsign,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = requester.faction.replace("_", " "),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontSize = 10.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val success = SupabaseService.acceptFriendRequest(requester.callsign, GameState.callsign)
+                                        if (success) {
+                                            onRefresh()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppleGreen, contentColor = ObsidianBlack),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("ACCEPT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val success = SupabaseService.deleteFriendship(requester.callsign, GameState.callsign)
+                                        if (success) {
+                                            onRefresh()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppleRed, contentColor = TextPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("DECLINE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         }
