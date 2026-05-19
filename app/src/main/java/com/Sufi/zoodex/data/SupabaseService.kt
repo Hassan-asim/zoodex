@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.text.SimpleDateFormat
 import java.util.*
 
 data class OperativeMessage(
@@ -33,6 +34,12 @@ object SupabaseService {
     private const val SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpY25ib3hkZG11dmFjdXltaHdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDI5NjAsImV4cCI6MjA5NDc3ODk2MH0.9SuUSypsX6dQ72kKujknv4SIP-mnY1bvB5eQPgyGYlw"
     private const val TAG = "SupabaseService"
 
+    private fun getISO8601Timestamp(): String {
+        val df = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        df.timeZone = TimeZone.getTimeZone("UTC")
+        return df.format(Date())
+    }
+
     // Initialize user profile
     suspend fun initializeUserProfile(callsign: String, faction: String): Boolean {
         return try {
@@ -41,7 +48,7 @@ object SupabaseService {
                 put("faction", faction)
                 put("level", if (GameState.playerLevel > 0) GameState.playerLevel else 1)
                 put("online", true)
-                put("last_seen", System.currentTimeMillis())
+                put("last_seen", getISO8601Timestamp())
             }
 
             val result = makeRequest(
@@ -126,7 +133,6 @@ object SupabaseService {
                 put("sender_callsign", senderCallsign)
                 put("receiver_callsign", receiverCallsign)
                 put("content", content)
-                put("created_at", System.currentTimeMillis())
                 put("is_read", false)
             }
 
@@ -189,7 +195,6 @@ object SupabaseService {
                 put("requester_callsign", myCallsign)
                 put("friend_callsign", friendCallsign)
                 put("status", "pending")
-                put("created_at", System.currentTimeMillis())
             }
 
             val result = makeRequest(
