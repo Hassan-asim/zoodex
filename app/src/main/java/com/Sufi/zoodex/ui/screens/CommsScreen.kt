@@ -437,6 +437,7 @@ fun FriendsTab(
                                         val success = SupabaseService.acceptFriendRequest(requester.callsign, GameState.callsign)
                                         if (success) {
                                             onRefresh()
+                                            onSelectFriend(requester)
                                         }
                                     }
                                 },

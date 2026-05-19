@@ -238,17 +238,24 @@ object SupabaseService {
 
     // Accept friend request
     suspend fun acceptFriendRequest(requesterCallsign: String, myCallsign: String): Boolean {
+        // First delete the pending request row
+        deleteFriendship(requesterCallsign, myCallsign)
+        
+        // Then insert the accepted friendship row
         return try {
-            val updateData = JSONObject().apply {
+            val friendshipData = JSONObject().apply {
+                put("requester_callsign", requesterCallsign)
+                put("friend_callsign", myCallsign)
                 put("status", "accepted")
             }
-            
+
             val result = makeRequest(
-                url = "$SUPABASE_URL/friendships?requester_callsign=eq.$requesterCallsign&friend_callsign=eq.$myCallsign",
-                method = "PATCH",
-                body = updateData.toString()
+                url = "$SUPABASE_URL/friendships",
+                method = "POST",
+                body = friendshipData.toString(),
+                isInsert = true
             )
-            Log.d(TAG, "Friend request accepted: $result")
+            Log.d(TAG, "Friend request accepted and inserted: $result")
             result != null
         } catch (e: Exception) {
             Log.e(TAG, "Error accepting friend request: ${e.message}")
