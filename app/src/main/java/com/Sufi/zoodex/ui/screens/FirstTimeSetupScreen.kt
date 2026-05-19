@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import com.Sufi.zoodex.data.GameState
+import com.Sufi.zoodex.data.SupabaseService
+import kotlinx.coroutines.launch
+import android.util.Log
 import com.Sufi.zoodex.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -30,6 +33,8 @@ fun FirstTimeSetupScreen(onSetupComplete: (String, String) -> Unit) {
     var selectedFaction by remember { mutableStateOf("") }
     var selectedAvatar by remember { mutableStateOf("🦊") }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isDeploying by remember { mutableStateOf(false) }
 
     val factions = listOf(
         Triple("NEON_SYNDICATE", NeonCyan, "Cybernetic bio-hackers controlling digital forest areas."),
@@ -211,13 +216,22 @@ fun FirstTimeSetupScreen(onSetupComplete: (String, String) -> Unit) {
         }
 
         // Deploy Button
-        val isReady = callsign.isNotBlank() && selectedFaction.isNotBlank()
+        val isReady = callsign.isNotBlank() && selectedFaction.isNotBlank() && !isDeploying
         Button(
             onClick = {
-                if (isReady) {
-                    GameState.init(context)
-                    GameState.setProfile(context, callsign, selectedFaction, selectedAvatar)
-                    onSetupComplete(callsign, selectedFaction)
+                if (callsign.isNotBlank() && selectedFaction.isNotBlank() && !isDeploying) {
+                    isDeploying = true
+                    scope.launch {
+                        try {
+                            SupabaseService.initializeUserProfile(callsign, selectedFaction)
+                        } catch (e: Exception) {
+                            Log.e("FirstTimeSetup", "Failed to register: ${e.message}")
+                        }
+                        GameState.init(context)
+                        GameState.setProfile(context, callsign, selectedFaction, selectedAvatar)
+                        isDeploying = false
+                        onSetupComplete(callsign, selectedFaction)
+                    }
                 }
             },
             enabled = isReady,
@@ -235,7 +249,7 @@ fun FirstTimeSetupScreen(onSetupComplete: (String, String) -> Unit) {
                 .padding(bottom = 8.dp)
         ) {
             Text(
-                text = "Deploy Operative",
+                text = if (isDeploying) "Deploying..." else "Deploy Operative",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = if (isReady) ObsidianBlack else TextSecondary.copy(alpha = 0.4f)

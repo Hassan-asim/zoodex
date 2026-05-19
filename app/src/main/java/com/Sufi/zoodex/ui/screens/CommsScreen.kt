@@ -39,7 +39,6 @@ fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
 
     fun refreshFriendsList() {
         scope.launch {
-            isLoading = true
             try {
                 val loadedFriends = SupabaseService.fetchFriendsForCallsign(GameState.callsign)
                 friends.clear()
@@ -48,18 +47,49 @@ fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
                 val loadedPending = SupabaseService.fetchPendingRequests(GameState.callsign)
                 pendingRequests.clear()
                 pendingRequests.addAll(loadedPending)
-                Log.d("CommsScreen", "Loaded ${friends.size} friends and ${pendingRequests.size} pending requests")
+                Log.d("CommsScreen", "Manually refreshed friends list")
             } catch (e: Exception) {
-                Log.e("CommsScreen", "Error loading friends: ${e.message}")
+                Log.e("CommsScreen", "Error manually refreshing friends: ${e.message}")
             }
-            isLoading = false
         }
     }
 
-    // Load friends on launch
+    // Load and poll friends and requests on launch and periodically
     LaunchedEffect(Unit) {
         GameState.init(context)
-        refreshFriendsList()
+        
+        // Ensure our own profile is registered in Supabase
+        withContext(Dispatchers.IO) {
+            try {
+                SupabaseService.initializeUserProfile(GameState.callsign, GameState.faction)
+            } catch (e: Exception) {
+                Log.e("CommsScreen", "Failed to register profile: ${e.message}")
+            }
+        }
+
+        isLoading = true
+        var isFirst = true
+        while (true) {
+            try {
+                val loadedFriends = SupabaseService.fetchFriendsForCallsign(GameState.callsign)
+                val loadedPending = SupabaseService.fetchPendingRequests(GameState.callsign)
+                
+                // Compare and update lists to avoid unnecessary UI redraws
+                if (isFirst || loadedFriends.size != friends.size || loadedFriends.map { it.callsign } != friends.map { it.callsign }) {
+                    friends.clear()
+                    friends.addAll(loadedFriends)
+                }
+                if (isFirst || loadedPending.size != pendingRequests.size || loadedPending.map { it.callsign } != pendingRequests.map { it.callsign }) {
+                    pendingRequests.clear()
+                    pendingRequests.addAll(loadedPending)
+                }
+            } catch (e: Exception) {
+                Log.e("CommsScreen", "Error polling friends/requests: ${e.message}")
+            }
+            isLoading = false
+            isFirst = false
+            delay(3500)
+        }
     }
 
     if (selectedFriend != null) {
@@ -473,21 +503,27 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
     var isSending by remember { mutableStateOf(false) }
     val scrollState = rememberLazyListState()
 
-    // Load messages on launch
-    LaunchedEffect(friend.id) {
-        scope.launch {
-            isLoading = true
+    // Load and poll messages on launch and periodically
+    LaunchedEffect(friend.callsign) {
+        isLoading = true
+        var isFirst = true
+        while (true) {
             try {
                 val loadedMessages = SupabaseService.fetchMessages(GameState.callsign, friend.callsign)
-                messages = loadedMessages
-                Log.d("DirectMessages", "Loaded ${messages.size} messages")
-                if (messages.isNotEmpty()) {
-                    scrollState.animateScrollToItem(messages.size - 1)
+                // Update only if counts or last messages differ
+                if (loadedMessages.size != messages.size || loadedMessages.lastOrNull()?.id != messages.lastOrNull()?.id) {
+                    messages = loadedMessages
+                    if (isFirst && messages.isNotEmpty()) {
+                        delay(100) // Small delay to let UI render before scroll
+                        scrollState.animateScrollToItem(messages.size - 1)
+                    }
                 }
             } catch (e: Exception) {
-                Log.e("DirectMessages", "Error loading messages: ${e.message}")
+                Log.e("DirectMessages", "Error polling messages: ${e.message}")
             }
             isLoading = false
+            isFirst = false
+            delay(2500)
         }
     }
 

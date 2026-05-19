@@ -39,7 +39,7 @@ object SupabaseService {
             val profileData = JSONObject().apply {
                 put("callsign", callsign)
                 put("faction", faction)
-                put("level", 1)
+                put("level", if (GameState.playerLevel > 0) GameState.playerLevel else 1)
                 put("online", true)
                 put("last_seen", System.currentTimeMillis())
             }
@@ -48,7 +48,8 @@ object SupabaseService {
                 url = "$SUPABASE_URL/operative_profiles",
                 method = "POST",
                 body = profileData.toString(),
-                isInsert = true
+                isInsert = true,
+                isUpsert = true
             )
             Log.d(TAG, "Profile initialized: $result")
             result != null
@@ -270,7 +271,8 @@ object SupabaseService {
         url: String,
         method: String = "GET",
         body: String? = null,
-        isInsert: Boolean = false
+        isInsert: Boolean = false,
+        isUpsert: Boolean = false
     ): String? {
         return withContext(Dispatchers.IO) {
             try {
@@ -281,7 +283,11 @@ object SupabaseService {
                     setRequestProperty("Authorization", "Bearer $SUPABASE_KEY")
                     setRequestProperty("apikey", SUPABASE_KEY)
                     setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Prefer", if (isInsert) "return=minimal" else "return=representation")
+                    if (isUpsert) {
+                        setRequestProperty("Prefer", "resolution=merge-duplicates")
+                    } else {
+                        setRequestProperty("Prefer", if (isInsert) "return=minimal" else "return=representation")
+                    }
                 }
 
                 body?.let {
