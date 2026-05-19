@@ -75,6 +75,7 @@ object SupabaseService {
             )
             
             val result = mutableListOf<OperativeProfile>()
+            val addedCallsigns = mutableSetOf<String>()
             if (response != null) {
                 val array = JSONArray(response)
                 for (i in 0 until array.length()) {
@@ -82,8 +83,12 @@ object SupabaseService {
                     val reqCallsign = obj.getString("requester_callsign")
                     val friendCallsign = obj.getString("friend_callsign")
                     val otherParty = if (reqCallsign.uppercase() == myCallsign.uppercase()) friendCallsign else reqCallsign
-                    val profile = fetchProfileByCallsign(otherParty)
-                    if (profile != null) result.add(profile)
+                    
+                    if (!addedCallsigns.contains(otherParty.uppercase())) {
+                        addedCallsigns.add(otherParty.uppercase())
+                        val profile = fetchProfileByCallsign(otherParty)
+                        if (profile != null) result.add(profile)
+                    }
                 }
             }
             result
@@ -211,9 +216,35 @@ object SupabaseService {
         }
     }
 
+    // Fetch all resolved friendships (accepted or rejected) for a user
+    private suspend fun fetchResolvedFriendships(myCallsign: String): Set<String> {
+        return try {
+            val response = makeRequest(
+                url = "$SUPABASE_URL/friendships?or=(requester_callsign.eq.$myCallsign,friend_callsign.eq.$myCallsign)&status=in.(accepted,rejected)",
+                method = "GET"
+            )
+            val resolved = mutableSetOf<String>()
+            if (response != null) {
+                val array = JSONArray(response)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val req = obj.getString("requester_callsign")
+                    val fri = obj.getString("friend_callsign")
+                    resolved.add(if (req.uppercase() == myCallsign.uppercase()) fri.uppercase() else req.uppercase())
+                }
+            }
+            resolved
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching resolved friendships: ${e.message}")
+            emptySet()
+        }
+    }
+
     // Fetch pending incoming friend requests
     suspend fun fetchPendingRequests(myCallsign: String): List<OperativeProfile> {
         return try {
+            val resolvedSet = fetchResolvedFriendships(myCallsign)
+            
             val response = makeRequest(
                 url = "$SUPABASE_URL/friendships?friend_callsign=eq.$myCallsign&status=eq.pending",
                 method = "GET"
@@ -225,8 +256,10 @@ object SupabaseService {
                 for (i in 0 until array.length()) {
                     val obj = array.getJSONObject(i)
                     val requesterCallsign = obj.getString("requester_callsign")
-                    val profile = fetchProfileByCallsign(requesterCallsign)
-                    if (profile != null) result.add(profile)
+                    if (!resolvedSet.contains(requesterCallsign.uppercase())) {
+                        val profile = fetchProfileByCallsign(requesterCallsign)
+                        if (profile != null) result.add(profile)
+                    }
                 }
             }
             result
@@ -238,14 +271,10 @@ object SupabaseService {
 
     // Accept friend request
     suspend fun acceptFriendRequest(requesterCallsign: String, myCallsign: String): Boolean {
-        // First delete the pending request row
-        deleteFriendship(requesterCallsign, myCallsign)
-        
-        // Then insert the accepted friendship row
         return try {
             val friendshipData = JSONObject().apply {
-                put("requester_callsign", requesterCallsign)
-                put("friend_callsign", myCallsign)
+                put("requester_callsign", myCallsign)
+                put("friend_callsign", requesterCallsign)
                 put("status", "accepted")
             }
 
@@ -263,17 +292,25 @@ object SupabaseService {
         }
     }
 
-    // Delete/Reject friend request or friendship
+    // Delete/Reject friend request or friendship (Decline)
     suspend fun deleteFriendship(requesterCallsign: String, friendCallsign: String): Boolean {
         return try {
+            val friendshipData = JSONObject().apply {
+                put("requester_callsign", friendCallsign) // myCallsign
+                put("friend_callsign", requesterCallsign) // requesterCallsign
+                put("status", "rejected")
+            }
+
             val result = makeRequest(
-                url = "$SUPABASE_URL/friendships?or=(and(requester_callsign.eq.$requesterCallsign,friend_callsign.eq.$friendCallsign),and(requester_callsign.eq.$friendCallsign,friend_callsign.eq.$requesterCallsign))",
-                method = "DELETE"
+                url = "$SUPABASE_URL/friendships",
+                method = "POST",
+                body = friendshipData.toString(),
+                isInsert = true
             )
-            Log.d(TAG, "Friendship deleted/rejected: $result")
+            Log.d(TAG, "Friend request declined and rejected: $result")
             result != null
         } catch (e: Exception) {
-            Log.e(TAG, "Error deleting friendship: ${e.message}")
+            Log.e(TAG, "Error declining friendship: ${e.message}")
             false
         }
     }
@@ -292,6 +329,8 @@ object SupabaseService {
                 val connection = requestUrl.openConnection() as java.net.HttpURLConnection
                 connection.apply {
                     requestMethod = method
+                    connectTimeout = 8000
+                    readTimeout = 8000
                     setRequestProperty("Authorization", "Bearer $SUPABASE_KEY")
                     setRequestProperty("apikey", SUPABASE_KEY)
                     setRequestProperty("Content-Type", "application/json")
@@ -305,21 +344,31 @@ object SupabaseService {
                 body?.let {
                     connection.doOutput = true
                     connection.outputStream.write(it.toByteArray())
+                    connection.outputStream.flush()
+                    connection.outputStream.close()
                 }
 
                 val responseCode = connection.responseCode
                 Log.d(TAG, "Response Code: $responseCode for URL: $url")
 
-                val stream = if (responseCode == 200 || responseCode == 201) {
-                    connection.inputStream
+                val response = if (responseCode in 200..299) {
+                    if (responseCode == 204) {
+                        ""
+                    } else {
+                        val stream = connection.inputStream
+                        val content = stream?.bufferedReader()?.readText()
+                        stream?.close()
+                        content
+                    }
                 } else {
-                    connection.errorStream
+                    val stream = connection.errorStream
+                    val content = stream?.bufferedReader()?.readText()
+                    stream?.close()
+                    Log.e(TAG, "Request failed with code $responseCode: $content")
+                    null
                 }
 
-                val response = stream?.bufferedReader()?.readText()
-                stream?.close()
                 connection.disconnect()
-
                 response
             } catch (e: Exception) {
                 Log.e(TAG, "Request error: ${e.message}", e)
