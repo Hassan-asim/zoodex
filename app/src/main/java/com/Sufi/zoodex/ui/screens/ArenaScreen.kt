@@ -303,7 +303,7 @@ fun ArenaScreen(
         when (skillName) {
             "CORE SLASH" -> {
                 val baseDmg = 22 + (currentBeast.strength * 1.1).toInt()
-                finalDmg = ((baseDmg - (enemy.defense / 2.5)).coerceAtLeast(10) * multiplier).toInt() + (1..6).random()
+                finalDmg = ((baseDmg - (enemy.defense * 2 / 5)).coerceAtLeast(10) * multiplier).toInt() + (1..6).random()
                 moveLog = ">> ${currentBeast.name} uses CORE SLASH! A cybernetic blade strikes for $finalDmg damage."
             }
             "PLASMA BURST" -> {

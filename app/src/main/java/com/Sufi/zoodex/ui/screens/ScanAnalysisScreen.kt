@@ -29,6 +29,7 @@ import com.Sufi.zoodex.data.AnimalDatabase
 import com.Sufi.zoodex.data.AnimalScanDetector
 import com.Sufi.zoodex.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
