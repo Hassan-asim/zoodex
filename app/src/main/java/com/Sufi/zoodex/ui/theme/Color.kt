@@ -28,10 +28,10 @@ val TextPrimary: Color
     get() = if (GameState.isDarkTheme) Color(0xFFFFFFFF) else Color(0xFF151821)
 
 val TextSecondary: Color
-    get() = if (GameState.isDarkTheme) Color(0xFF8E8E93) else Color(0xFF4A4B54)
+    get() = if (GameState.isDarkTheme) Color(0xFF8E8E93) else Color(0xFF33353E)
 
 val TextTertiary: Color
-    get() = if (GameState.isDarkTheme) Color(0xFF48484A) else Color(0xFF757680)
+    get() = if (GameState.isDarkTheme) Color(0xFF48484A) else Color(0xFF4C4D56)
 
 /** Dividers and card hairlines — dark surfaces use white mist; light surfaces use charcoal mist. */
 val HairlineDivider: Color
@@ -71,6 +71,6 @@ val DarkSurface: Color
     get() = GlassSurface
 
 val CyberLime: Color
-    get() = CyberBlueStart
+    get() = AppleGreen
 val VoltViolet: Color
     get() = CyberBlueEnd

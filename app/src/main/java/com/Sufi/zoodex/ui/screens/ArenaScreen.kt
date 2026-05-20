@@ -51,6 +51,15 @@ import kotlinx.coroutines.withContext
 
 enum class ArenaPhase { PRE_MATCH, SEARCHING, PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
 
+private data class MoveSlot(val name: String, val icon: String, val desc: String, val color: androidx.compose.ui.graphics.Color)
+
+private val arenaMoveSlots = listOf(
+    MoveSlot("CORE SLASH",   "⚔️", "Physical Strike",       androidx.compose.ui.graphics.Color(0xFF0A84FF)),
+    MoveSlot("PLASMA BURST", "💥", "High DMG + Recoil",    androidx.compose.ui.graphics.Color(0xFFFF9F0A)),
+    MoveSlot("SHIELD SHELL", "🛡️", "Low DMG + Self Heal",  androidx.compose.ui.graphics.Color(0xFF30D158)),
+    MoveSlot("TECH REBOOT",  "🔄", "Heal / Overclock",     androidx.compose.ui.graphics.Color(0xFFBF5AF2))
+)
+
 private enum class OpponentMode { AI, FRIEND }
 
 @Composable
@@ -890,10 +899,18 @@ fun ArenaScreen(
                     ) {
                         logList.takeLast(5).forEach { line ->
                             val lineCol = when {
-                                line.contains("VICTORY") -> AppleGreen
-                                line.contains("DEFEAT") -> AppleRed
-                                line.contains("Swapping") -> AppleBlue
-                                line.contains("strikes") -> AppleOrange
+                                line.contains("VICTORY") || line.contains("ALL HOSTILE") -> AppleGreen
+                                line.contains("DEFEAT") || line.contains("ERROR") -> AppleRed
+                                line.contains("ELEMENTAL ADVANTAGE") -> Color(0xFF30D158)
+                                line.contains("ELEMENT RESISTED") -> Color(0xFFFF9F0A)
+                                line.contains("EMERGENCY OVERCLOCK") || line.contains("CRITICAL") -> Color(0xFFBF5AF2)
+                                line.contains("Recoil") -> AppleOrange
+                                line.contains("strikes") || line.contains("HOSTILE") -> Color(0xFFFF6B6B)
+                                line.contains("CORE SLASH") -> AppleBlue
+                                line.contains("PLASMA BURST") -> AppleOrange
+                                line.contains("SHIELD SHELL") -> AppleGreen
+                                line.contains("TECH REBOOT") || line.contains("repairs") || line.contains("Restored") -> Color(0xFFBF5AF2)
+                                line.contains("fainted") -> AppleRed
                                 else -> TextSecondary
                             }
                             Text(
@@ -915,40 +932,48 @@ fun ArenaScreen(
                         .fillMaxHeight()
                 ) {
                     if (phase == ArenaPhase.PLAYER_TURN) {
+                        val moveSlots = arenaMoveSlots
                         Column(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            val moves = listOf("CORE SLASH", "PLASMA BURST", "SHIELD SHELL", "TECH REBOOT")
                             Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                moves.take(2).forEach { move ->
-                                    Button(
-                                        onClick = { playerExecuteAttack(move) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = GlassSurface, contentColor = AppleBlue),
-                                        shape = RoundedCornerShape(8.dp),
-                                        border = BorderStroke(0.5.dp, Color.White.copy(0.08f)),
+                                moveSlots.take(2).forEach { slot ->
+                                    Box(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentPadding = PaddingValues(2.dp)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(slot.color.copy(0.1f))
+                                            .border(1.dp, slot.color.copy(0.4f), RoundedCornerShape(8.dp))
+                                            .clickable { playerExecuteAttack(slot.name) },
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(move, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(slot.icon, fontSize = 14.sp)
+                                            Text(slot.name, fontWeight = FontWeight.ExtraBold, fontSize = 7.5.sp, color = slot.color, textAlign = TextAlign.Center)
+                                            Text(slot.desc, fontSize = 6.sp, color = TextSecondary, textAlign = TextAlign.Center)
+                                        }
                                     }
                                 }
                             }
                             Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                moves.takeLast(2).forEach { move ->
-                                    Button(
-                                        onClick = { playerExecuteAttack(move) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = GlassSurface, contentColor = AppleBlue),
-                                        shape = RoundedCornerShape(8.dp),
-                                        border = BorderStroke(0.5.dp, Color.White.copy(0.08f)),
+                                moveSlots.takeLast(2).forEach { slot ->
+                                    Box(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentPadding = PaddingValues(2.dp)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(slot.color.copy(0.1f))
+                                            .border(1.dp, slot.color.copy(0.4f), RoundedCornerShape(8.dp))
+                                            .clickable { playerExecuteAttack(slot.name) },
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(move, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(slot.icon, fontSize = 14.sp)
+                                            Text(slot.name, fontWeight = FontWeight.ExtraBold, fontSize = 7.5.sp, color = slot.color, textAlign = TextAlign.Center)
+                                            Text(slot.desc, fontSize = 6.sp, color = TextSecondary, textAlign = TextAlign.Center)
+                                        }
                                     }
                                 }
                             }

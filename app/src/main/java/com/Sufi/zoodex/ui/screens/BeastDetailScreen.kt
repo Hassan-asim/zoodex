@@ -22,17 +22,22 @@ private val elementMetaData = mapOf(
     "ELECTR" to Pair("⚡", Color(0xFFFFDD00)),
     "VOID" to Pair("🔮", Color(0xFFBF5AF2)),
     "FIRE" to Pair("🔥", Color(0xFFFF5522)),
-    "CYBER" to Pair("💾", Color(0xFF30D158))
+    "CYBER" to Pair("💾", Color(0xFF30D158)),
+    "WATER" to Pair("💧", Color(0xFF00B4D8)),
+    "EARTH" to Pair("🪨", Color(0xFF8B4513))
 )
 
 @Composable
 fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
     val context = LocalContext.current
+    val dbAnimal = remember(beastId) { AnimalDatabase.getAnimalById(beastId) } ?: return
     val capturedBeastState = remember(GameState.capturedBeasts.size, beastId) {
-        derivedStateOf { GameState.capturedBeasts.find { it.id == beastId } }
+        derivedStateOf {
+            GameState.capturedBeasts.find { it.name.uppercase() == dbAnimal.name.uppercase() }
+                ?: GameState.capturedBeasts.find { it.id == beastId }
+        }
     }
     val capturedBeast = capturedBeastState.value
-    val dbAnimal = remember(beastId) { AnimalDatabase.getAnimalById(beastId) } ?: return
     val beast = capturedBeast ?: Beast(
         id = dbAnimal.id,
         name = dbAnimal.name,
