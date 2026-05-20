@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
 
 /**
@@ -44,7 +45,10 @@ fun ScreenHeader(title: String, onBack: () -> Unit) {
                     ),
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .background(Color.White.copy(0.04f), RoundedCornerShape(12.dp))
+                        .background(
+                            if (GameState.isDarkTheme) Color.White.copy(0.04f) else Color.Black.copy(0.04f),
+                            RoundedCornerShape(12.dp)
+                        )
                 ) {
                     Text(
                         text = "← Back", 
@@ -65,8 +69,8 @@ fun ScreenHeader(title: String, onBack: () -> Unit) {
             }
 
             // Sleek bottom border line
-            Divider(
-                color = Color.White.copy(alpha = 0.08f),
+            HorizontalDivider(
+                color = HairlineDivider,
                 thickness = 0.5.dp
             )
         }
@@ -80,7 +84,7 @@ fun ScreenHeader(title: String, onBack: () -> Unit) {
 fun GlassCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    border: BorderStroke? = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+    border: BorderStroke? = BorderStroke(1.dp, HairlineDivider),
     content: @Composable ColumnScope.() -> Unit
 ) {
     val cardModifier = if (onClick != null) {

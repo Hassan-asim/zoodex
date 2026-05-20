@@ -3,14 +3,31 @@ package com.Sufi.zoodex.ui.screens
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.net.Uri
 import android.util.Log
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,14 +41,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
 import com.Sufi.zoodex.data.GameState
+import com.Sufi.zoodex.data.OperativeProfile
+import com.Sufi.zoodex.data.SupabaseService
 import com.Sufi.zoodex.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 enum class ArenaPhase { PRE_MATCH, SEARCHING, PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
 
+private enum class OpponentMode { AI, FRIEND }
+
 @Composable
-fun ArenaScreen(onBack: () -> Unit) {
+fun ArenaScreen(
+    navMode: String,
+    navFriendEncoded: String,
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -46,25 +73,64 @@ fun ArenaScreen(onBack: () -> Unit) {
     }
 
     var phase by remember { mutableStateOf(ArenaPhase.PRE_MATCH) }
-    var logList by remember { mutableStateOf(listOf(">> CHOOSE A SQUAD TO DEPLOY IN SECTOR...")) }
+    var logList by remember { mutableStateOf(listOf(">> CONFIGURE HOSTILE ENCOUNTER AND SQUAD...")) }
 
-    // Dynamic Battle Setup based on persistent active roster
     LaunchedEffect(Unit) {
         GameState.init(context)
     }
 
-    // Party-based health trackers
+    var opponentMode by rememberSaveable { mutableStateOf(OpponentMode.AI) }
+    var friendCallsign by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(navMode, navFriendEncoded) {
+        opponentMode = if (navMode.equals("friend", ignoreCase = true)) OpponentMode.FRIEND else OpponentMode.AI
+        friendCallsign = when {
+            navFriendEncoded.isBlank() || navFriendEncoded == "NONE" -> ""
+            else -> Uri.decode(navFriendEncoded)
+        }
+    }
+
+    var friendsLoaded by remember { mutableStateOf<List<OperativeProfile>>(emptyList()) }
+    LaunchedEffect(opponentMode, phase) {
+        if (opponentMode == OpponentMode.FRIEND && phase == ArenaPhase.PRE_MATCH) {
+            val mine = GameState.callsign.ifBlank {
+                context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE).getString("callsign", "") ?: ""
+            }
+            if (mine.isNotBlank()) {
+                friendsLoaded = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseService.fetchFriendsForCallsign(mine)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }
+        }
+    }
+
     val selectedTeamBeasts = remember { mutableStateListOf<Beast>() }
     val playerHpList = remember { mutableStateListOf<Int>() }
     val playerMaxHpList = remember { mutableStateListOf<Int>() }
     var activeIndex by remember { mutableIntStateOf(0) }
 
-    // Get current fighting player beast
+    val enemyTeamBeasts = remember { mutableStateListOf<Beast>() }
+    val enemyHpList = remember { mutableStateListOf<Int>() }
+    val enemyMaxHpList = remember { mutableStateListOf<Int>() }
+    var activeEnemyIndex by remember { mutableIntStateOf(0) }
+
     val currentFightingPlayerBeast = remember {
-        derivedStateOf { selectedTeamBeasts.getOrNull(activeIndex) ?: Beast(99, "VOLT HOUND", "VOLT HOUND", 1, 0, "ELECTR", 14, 8, 18, 120, 120, 100, 100, 0, true) }
+        derivedStateOf {
+            selectedTeamBeasts.getOrNull(activeIndex)
+                ?: Beast(99, "VOLT HOUND", "VOLT HOUND", 1, 0, "ELECTR", 14, 8, 18, 120, 120, 100, 100, 0, true)
+        }
     }
 
-    // Dynamic Spawn Boss enemy based on player level
+    val currentEnemyBeast = remember(activeEnemyIndex, enemyTeamBeasts.size) {
+        derivedStateOf {
+            enemyTeamBeasts.getOrNull(activeEnemyIndex)
+                ?: Beast(998, "SCANNING", "SCANNING", 1, 0, "CYBER", 1, 1, 1, 1, 1, 100, 100, 0, false)
+        }
+    }
+
     val bossOptions = listOf(
         Triple("GLITCH SPECTER", "CYBER", "👾"),
         Triple("NEON TIGER", "CYBER", "🐅"),
@@ -73,36 +139,30 @@ fun ArenaScreen(onBack: () -> Unit) {
     )
     val bossInfo = remember { bossOptions.random() }
     val isTerritoryBattle = remember { GameState.activeTerritoryBattle != null }
-    val enemyBeast = remember {
-        val bossLvl = GameState.playerLevel + 1
-        val baseHp = 110 + (bossLvl * 15)
-        val name = if (isTerritoryBattle) "RIVAL ${GameState.activeTerritoryBattle!!.callsign.uppercase()}" else bossInfo.first
-        Beast(
-            id = 999,
-            name = name,
-            nickname = name,
-            level = bossLvl,
-            xp = 0,
-            elementType = bossInfo.second,
-            strength = 12 + (bossLvl * 2),
-            defense = 8 + bossLvl,
-            agility = 10 + bossLvl,
-            maxHp = baseHp,
-            currentHp = baseHp
-        )
+
+    val rewardGold = remember(enemyTeamBeasts.size, isTerritoryBattle) {
+        val wave = enemyTeamBeasts.size.coerceAtLeast(1)
+        if (isTerritoryBattle) 150 + wave * 20 else 100 + wave * 25 + GameState.playerLevel * 8
+    }
+    val rewardXP = remember(enemyTeamBeasts.size, isTerritoryBattle) {
+        val wave = enemyTeamBeasts.size.coerceAtLeast(1)
+        if (isTerritoryBattle) 250 + wave * 30 else 80 + wave * 20 + GameState.playerLevel * 6
     }
 
-    var enemyHp by remember { mutableIntStateOf(enemyBeast.currentHp) }
+    val toneGen = remember {
+        try {
+            ToneGenerator(AudioManager.STREAM_MUSIC, 85)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { toneGen?.release() }
+    }
 
-    // Rewards bounds
-    val rewardGold = remember { if (isTerritoryBattle) 150 else 100 + (enemyBeast.level * 10) }
-    val rewardXP = remember { if (isTerritoryBattle) 250 else 80 + (enemyBeast.level * 8) }
-
-    // Dynamic Shake/Flash hit offsets
     var playerShakeX by remember { mutableStateOf(0f) }
     var enemyShakeX by remember { mutableStateOf(0f) }
 
-    // Idle hover floating animation loop
     val floatAnim = rememberInfiniteTransition(label = "hover")
     val playerFloatY by floatAnim.animateFloat(
         initialValue = -4f, targetValue = 4f,
@@ -113,26 +173,96 @@ fun ArenaScreen(onBack: () -> Unit) {
         animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Reverse), label = "e_float"
     )
 
-    // Matchmaking sequence triggers after squad choice
+    fun buildEnemyTeam(): List<Beast> {
+        val n = selectedTeamBeasts.size
+        if (n == 0) return emptyList()
+        val lvlBase = GameState.playerLevel + 1
+        return if (opponentMode == OpponentMode.AI) {
+            val pool = bossOptions.shuffled()
+            List(n) { idx ->
+                val pick = pool[idx % pool.size]
+                val lvl = lvlBase + idx / 2
+                val hp = 95 + lvl * 14
+                val territory = GameState.activeTerritoryBattle
+                val name = if (isTerritoryBattle && idx == 0 && territory != null) {
+                    "RIVAL ${territory.callsign.uppercase()}"
+                } else {
+                    "${pick.first} ${idx + 1}"
+                }
+                Beast(
+                    id = 900 + idx,
+                    name = name,
+                    nickname = name,
+                    level = lvl,
+                    xp = 0,
+                    elementType = pick.second,
+                    strength = 10 + lvl * 2,
+                    defense = 6 + lvl,
+                    agility = 8 + lvl,
+                    maxHp = hp,
+                    currentHp = hp
+                )
+            }
+        } else {
+            val tag = friendCallsign.ifBlank { "OPERATIVE" }.uppercase()
+            val elements = listOf("CYBER", "VOID", "FIRE", "ELECTR")
+            List(n) { idx ->
+                val lvl = lvlBase + idx
+                val hp = 100 + lvl * 12
+                Beast(
+                    id = 800 + idx,
+                    name = "HOSTILE $tag-${idx + 1}",
+                    nickname = "HOSTILE $tag-${idx + 1}",
+                    level = lvl,
+                    xp = 0,
+                    elementType = elements[idx % elements.size],
+                    strength = 11 + lvl * 2,
+                    defense = 7 + lvl,
+                    agility = 9 + lvl,
+                    maxHp = hp,
+                    currentHp = hp
+                )
+            }
+        }
+    }
+
     fun startSearchingMatch() {
+        if (opponentMode == OpponentMode.FRIEND && friendCallsign.isBlank()) {
+            logList = listOf(">> ENTER OR PICK A FRIEND CALLSIGN BEFORE DEPLOYING.")
+            return
+        }
         phase = ArenaPhase.SEARCHING
         logList = listOf(">> SYNCHRONIZING ARENA BEACON...")
         scope.launch {
-            delay(1500)
-            logList = logList + ">> SECTOR BEACON IDENTIFIED: RIVAL BOSS [${enemyBeast.name}]"
-            delay(1000)
-            logList = logList + ">> ENGAGING TARGET STAGES..."
-            delay(800)
+            delay(1200)
+            val roster = buildEnemyTeam()
+            enemyTeamBeasts.clear()
+            enemyTeamBeasts.addAll(roster)
+            enemyHpList.clear()
+            enemyMaxHpList.clear()
+            roster.forEach { b ->
+                enemyHpList.add(b.maxHp)
+                enemyMaxHpList.add(b.maxHp)
+            }
+            activeEnemyIndex = 0
+            val label = if (opponentMode == OpponentMode.AI) "AI WAVE" else "FRIEND SQUAD"
+            logList = logList + ">> LINK ESTABLISHED ($label) — ${roster.size} HOSTILE UNITS"
+            delay(900)
+            logList = logList + ">> FIRST CONTACT: ${roster.firstOrNull()?.name ?: "UNKNOWN"}"
+            delay(500)
             phase = ArenaPhase.PLAYER_TURN
         }
     }
 
-    // Player Turn Action
     fun playerExecuteAttack(skillName: String) {
         if (phase != ArenaPhase.PLAYER_TURN) return
         val currentBeast = currentFightingPlayerBeast.value
+        val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: return
+        val eIdx = activeEnemyIndex
+        val curEnemyHp = enemyHpList.getOrNull(eIdx) ?: return
+        val maxEnemyHp = enemyMaxHpList.getOrNull(eIdx) ?: 1
 
-        // Trigger physical hit shake animation on target (enemy)
+        toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 85)
         scope.launch {
             for (i in 0..5) {
                 enemyShakeX = if (i % 2 == 0) 10f else -10f
@@ -141,28 +271,38 @@ fun ArenaScreen(onBack: () -> Unit) {
             enemyShakeX = 0f
         }
 
-        // Damage formula scales on active beast's strength
         val baseDmg = 25 + (currentBeast.strength * 1.2).toInt()
-        val dmg = (baseDmg - (enemyBeast.defense / 2)).coerceAtLeast(15) + (1..10).random()
+        val dmg = (baseDmg - (enemy.defense / 2)).coerceAtLeast(12) + (1..10).random()
+        val newEh = (curEnemyHp - dmg).coerceAtLeast(0)
+        if (eIdx < enemyHpList.size) enemyHpList[eIdx] = newEh
 
-        enemyHp = (enemyHp - dmg).coerceAtLeast(0)
-        logList = logList + ">> [Slot #${activeIndex + 1}] ${currentBeast.name} uses $skillName! Deals $dmg damage."
+        logList = logList + ">> [Slot #${activeIndex + 1}] ${currentBeast.name} uses $skillName! Deals $dmg to ${enemy.name}."
 
-        if (enemyHp <= 0) {
-            phase = ArenaPhase.VICTORY
-            logList = logList + ">> ${enemyBeast.name} core collapsed! VICTORY CONFIRMED."
+        if (newEh <= 0) {
+            logList = logList + ">> ${enemy.name} neutralized."
+            if (activeEnemyIndex + 1 < enemyTeamBeasts.size) {
+                activeEnemyIndex++
+                logList = logList + ">> NEXT HOSTILE: ${enemyTeamBeasts[activeEnemyIndex].name}"
+                phase = ArenaPhase.PLAYER_TURN
+            } else {
+                phase = ArenaPhase.VICTORY
+                logList = logList + ">> ALL HOSTILE UNITS ELIMINATED. VICTORY CONFIRMED."
+            }
             return
         }
         phase = ArenaPhase.ENEMY_TURN
     }
 
-    // Turn Swap / Enemy Strike Execution
     LaunchedEffect(phase) {
         if (phase == ArenaPhase.ENEMY_TURN) {
-            delay(1400)
+            delay(1200)
             val currentBeast = currentFightingPlayerBeast.value
+            val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: run {
+                phase = ArenaPhase.PLAYER_TURN
+                return@LaunchedEffect
+            }
 
-            // Trigger shake animation on target (player)
+            toneGen?.startTone(ToneGenerator.TONE_SUP_RADIO_ACK, 95)
             scope.launch {
                 for (i in 0..5) {
                     playerShakeX = if (i % 2 == 0) 10f else -10f
@@ -171,10 +311,9 @@ fun ArenaScreen(onBack: () -> Unit) {
                 playerShakeX = 0f
             }
 
-            val baseDmg = 22 + (enemyBeast.strength * 1.1).toInt()
-            val dmg = (baseDmg - (currentBeast.defense / 2)).coerceAtLeast(12) + (1..8).random()
+            val baseDmg = 22 + (enemy.strength * 1.1).toInt()
+            val dmg = (baseDmg - (currentBeast.defense / 2)).coerceAtLeast(10) + (1..8).random()
 
-            // Apply damage to current active beast
             val currentHp = playerHpList.getOrElse(activeIndex) { currentBeast.maxHp }
             val newHp = (currentHp - dmg).coerceAtLeast(0)
 
@@ -182,20 +321,20 @@ fun ArenaScreen(onBack: () -> Unit) {
                 playerHpList[activeIndex] = newHp
             }
 
-            logList = logList + ">> ${enemyBeast.name} strikes ${currentBeast.name}! Deals $dmg damage."
+            logList = logList + ">> ${enemy.name} strikes ${currentBeast.name}! Deals $dmg damage."
 
             if (newHp <= 0) {
                 logList = logList + ">> [Slot #${activeIndex + 1}] ${currentBeast.name} core fainted!"
+                GameState.scheduleArenaRecovery(context, currentBeast.id, dmg, currentBeast.maxHp)
 
-                // Swap-in next squad member if available
                 if (activeIndex + 1 < selectedTeamBeasts.size) {
                     activeIndex++
                     val nextBeast = selectedTeamBeasts[activeIndex]
-                    logList = logList + ">> Swapping active lines! Deploying [Slot #${activeIndex + 1}] ${nextBeast.name}!"
+                    logList = logList + ">> Deploying [Slot #${activeIndex + 1}] ${nextBeast.name}!"
                     phase = ArenaPhase.PLAYER_TURN
                 } else {
                     phase = ArenaPhase.DEFEAT
-                    logList = logList + ">> All active squad fainted. DEFEAT RECORDED."
+                    logList = logList + ">> All squad units down. DEFEAT RECORDED."
                 }
             } else {
                 phase = ArenaPhase.PLAYER_TURN
@@ -277,6 +416,86 @@ fun ArenaScreen(onBack: () -> Unit) {
                         .padding(20.dp)
                 ) {
                     Text(
+                        "OPPONENT TYPE",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        fontSize = 10.sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { opponentMode = OpponentMode.AI },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (opponentMode == OpponentMode.AI) AppleBlue else GlassSurface,
+                                contentColor = if (opponentMode == OpponentMode.AI) ObsidianBlack else TextSecondary
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("VS AI", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = { opponentMode = OpponentMode.FRIEND },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (opponentMode == OpponentMode.FRIEND) AppleGreen else GlassSurface,
+                                contentColor = if (opponentMode == OpponentMode.FRIEND) ObsidianBlack else TextSecondary
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("VS FRIEND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                    if (opponentMode == OpponentMode.FRIEND) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = friendCallsign,
+                            onValueChange = { input: String -> friendCallsign = input.uppercase().trim() },
+                            label = { Text("Friend callsign", fontSize = 11.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = AppleGreen,
+                                unfocusedBorderColor = Color.White.copy(0.12f)
+                            )
+                        )
+                        if (friendsLoaded.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text("Tap ally:", fontSize = 9.sp, color = TextSecondary)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                friendsLoaded.take(8).forEach { f ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (friendCallsign.equals(f.callsign, true)) AppleGreen.copy(0.25f) else GlassSurface)
+                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(8.dp))
+                                            .clickable { friendCallsign = f.callsign.uppercase() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            f.callsign,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Text(
                         "CHOOSE A FIGHTING DEPLOYMENT TEAM",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
@@ -306,7 +525,10 @@ fun ArenaScreen(onBack: () -> Unit) {
                                 teamIds
                             }
                             
-                            val isTeamValid = finalTeamIds.isNotEmpty()
+                            val beasts = finalTeamIds.mapNotNull { id -> GameState.capturedBeasts.find { it.id == id } }
+                            val recovering = beasts.any { GameState.isBeastRecovering(it) }
+                            val friendOk = opponentMode == OpponentMode.AI || friendCallsign.isNotBlank()
+                            val isTeamValid = beasts.isNotEmpty() && !recovering && friendOk
 
                             Button(
                                 onClick = {
@@ -357,8 +579,17 @@ fun ArenaScreen(onBack: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(16.dp))
+                    if (opponentMode == OpponentMode.FRIEND && friendCallsign.isBlank()) {
+                        Text(
+                            "Enter a friend callsign (or pick from list) to battle their simulated squad.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AppleOrange,
+                            fontSize = 9.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     Text(
-                        "* Go configure your squads in the SQUAD TEAMS section of Command Hub.",
+                        "* Beasts in recovery (after arena faint) cannot deploy. Use Recovery Stim or Nano Repair in the shop.",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                         fontSize = 8.sp
@@ -475,19 +706,7 @@ fun ArenaScreen(onBack: () -> Unit) {
                                     Text("$hp/$max HP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = hpBarCol)
                                 }
                                 Spacer(Modifier.height(3.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .background(Color.White.copy(0.08f), RoundedCornerShape(2.dp))
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(ratio)
-                                            .fillMaxHeight()
-                                            .background(hpBarCol, RoundedCornerShape(2.dp))
-                                    )
-                                }
+                                AnimatedHpRatioBar(ratio = ratio, fillColor = hpBarCol)
                             }
                         }
                     }
@@ -508,6 +727,10 @@ fun ArenaScreen(onBack: () -> Unit) {
                                 translationY = enemyFloatY
                             )
                     ) {
+                        val eB = currentEnemyBeast.value
+                        val eHp = enemyHpList.getOrNull(activeEnemyIndex) ?: 0
+                        val eMax = enemyMaxHpList.getOrNull(activeEnemyIndex) ?: 1
+
                         // Glow base pedestal
                         Box(
                             modifier = Modifier
@@ -520,7 +743,7 @@ fun ArenaScreen(onBack: () -> Unit) {
                             contentAlignment = Alignment.Center
                         ) {
                             ElementVectorGraphic(
-                                elementType = enemyBeast.elementType,
+                                elementType = eB.elementType,
                                 modifier = Modifier.size(64.dp)
                             )
                         }
@@ -537,20 +760,20 @@ fun ArenaScreen(onBack: () -> Unit) {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        enemyBeast.name,
+                                        currentEnemyBeast.value.name,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 10.sp,
                                         color = TextPrimary
                                     )
                                     Text(
-                                        "LVL ${enemyBeast.level}",
+                                        "LVL ${currentEnemyBeast.value.level}",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 8.sp,
                                         color = AppleRed
                                     )
                                 }
 
-                                val ratio = (enemyHp.toFloat() / enemyBeast.maxHp.toFloat()).coerceIn(0f, 1f)
+                                val ratio = (eHp.toFloat() / eMax.toFloat()).coerceIn(0f, 1f)
                                 val hpBarCol = when {
                                     ratio > 0.5f -> AppleGreen
                                     ratio > 0.2f -> AppleOrange
@@ -559,23 +782,11 @@ fun ArenaScreen(onBack: () -> Unit) {
 
                                 Spacer(Modifier.height(4.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("BOSS UNIT", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = AppleRed)
-                                    Text("$enemyHp/${enemyBeast.maxHp} HP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = hpBarCol)
+                                    Text("HOSTILE ${activeEnemyIndex + 1}/${enemyTeamBeasts.size}", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = AppleRed)
+                                    Text("$eHp/$eMax HP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = hpBarCol)
                                 }
                                 Spacer(Modifier.height(3.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .background(Color.White.copy(0.08f), RoundedCornerShape(2.dp))
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(ratio)
-                                            .fillMaxHeight()
-                                            .background(hpBarCol, RoundedCornerShape(2.dp))
-                                    )
-                                }
+                                AnimatedHpRatioBar(ratio = ratio, fillColor = hpBarCol)
                             }
                         }
                     }
@@ -734,5 +945,31 @@ fun ArenaScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AnimatedHpRatioBar(
+    ratio: Float,
+    fillColor: Color,
+    trackColor: Color = Color.White.copy(0.08f)
+) {
+    val animated by animateFloatAsState(
+        targetValue = ratio.coerceIn(0f, 1f),
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "hpbar"
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .background(trackColor, RoundedCornerShape(3.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(animated)
+                .fillMaxHeight()
+                .background(fillColor, RoundedCornerShape(3.dp))
+        )
     }
 }

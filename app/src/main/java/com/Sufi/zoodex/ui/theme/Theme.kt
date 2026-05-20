@@ -29,10 +29,13 @@ private val AppleLightColorScheme = lightColorScheme(
     secondary = NeonViolet,
     background = Color(0xFFF2F4F8),
     surface = Color.White,
+    surfaceVariant = Color(0xFFE8ECF4),
     onPrimary = Color.White,
     onSecondary = Color(0xFF1A1F2C),
     onBackground = Color(0xFF1A1F2C),
-    onSurface = Color(0xFF1A1F2C)
+    onSurface = Color(0xFF1A1F2C),
+    onSurfaceVariant = Color(0xFF3A3A3C),
+    outline = Color(0xFF8E8E93)
 )
 
 @Composable

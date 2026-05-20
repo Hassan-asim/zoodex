@@ -251,7 +251,7 @@ fun AnimalEncyclopediaCard(
                     text = animal.name, 
                     style = MaterialTheme.typography.bodyMedium, 
                     fontSize = 9.sp,
-                    color = if (isCaptured) elemColor else Color.White.copy(0.5f), 
+                    color = if (isCaptured) elemColor else TextSecondary, 
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
@@ -271,17 +271,15 @@ fun AnimalEncyclopediaCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StatMini("HP", animal.baseHp)
-                        Divider(
-                            modifier = Modifier
-                                .width(0.5.dp)
-                                .height(12.dp),
+                        VerticalDivider(
+                            modifier = Modifier.height(12.dp),
+                            thickness = 0.5.dp,
                             color = elemColor.copy(0.3f)
                         )
                         StatMini("ATK", animal.baseAttack)
-                        Divider(
-                            modifier = Modifier
-                                .width(0.5.dp)
-                                .height(12.dp),
+                        VerticalDivider(
+                            modifier = Modifier.height(12.dp),
+                            thickness = 0.5.dp,
                             color = elemColor.copy(0.3f)
                         )
                         StatMini("DEF", animal.baseDefense)

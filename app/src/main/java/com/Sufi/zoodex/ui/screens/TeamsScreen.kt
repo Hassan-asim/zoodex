@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,6 +41,14 @@ fun TeamsScreen(onBack: () -> Unit) {
     
     LaunchedEffect(Unit) {
         GameState.init(context)
+    }
+
+    // Periodically refresh so arena recovery countdowns stay roughly current
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(15_000)
+            updateTrigger++
+        }
     }
 
     val activeFactionColor = CyberBlueStart
@@ -255,6 +265,16 @@ fun TeamsScreen(onBack: () -> Unit) {
                             fontSize = 7.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        if (GameState.isBeastRecovering(beast)) {
+                            Text(
+                                text = "Recovery ~${GameState.recoveryMinutesRemaining(beast)}m",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AppleOrange,
+                                fontSize = 6.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -290,6 +310,16 @@ fun TeamSlotCard(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
+            if (GameState.isBeastRecovering(beast)) {
+                Text(
+                    text = "Recovery ~${GameState.recoveryMinutesRemaining(beast)}m",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AppleOrange,
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))

@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
+import com.Sufi.zoodex.data.AnimalDatabase
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
 
@@ -27,13 +28,26 @@ private val elementMetaData = mapOf(
 @Composable
 fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
     val context = LocalContext.current
-    
-    // Find the beast in persistent state
-    val beastState = remember(GameState.capturedBeasts.size) {
+    val capturedBeastState = remember(GameState.capturedBeasts.size, beastId) {
         derivedStateOf { GameState.capturedBeasts.find { it.id == beastId } }
     }
-
-    val beast = beastState.value ?: return
+    val capturedBeast = capturedBeastState.value
+    val dbAnimal = remember(beastId) { AnimalDatabase.getAnimalById(beastId) } ?: return
+    val beast = capturedBeast ?: Beast(
+        id = dbAnimal.id,
+        name = dbAnimal.name,
+        nickname = dbAnimal.name,
+        level = 1,
+        xp = 0,
+        elementType = dbAnimal.elementType,
+        strength = dbAnimal.baseAttack,
+        defense = dbAnimal.baseDefense,
+        agility = dbAnimal.baseSpeed,
+        maxHp = dbAnimal.baseHp,
+        currentHp = dbAnimal.baseHp,
+        inActiveTeam = false
+    )
+    val isCaptured = capturedBeast != null
 
     val (emoji, elementColor) = elementMetaData[beast.elementType] ?: Pair("❓", TextSecondary)
     
@@ -121,7 +135,7 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp))
 
             // Stat Allocation Notification Card
-            if (GameState.statPointsAvailable > 0) {
+            if (isCaptured && GameState.statPointsAvailable > 0) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = NeonViolet.copy(alpha = 0.12f),
@@ -157,7 +171,7 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
 
             // Dynamic upgrade stat grid rows
             GlassCard(modifier = Modifier.fillMaxWidth()) {
-                val hasAvailable = GameState.statPointsAvailable > 0
+                val hasAvailable = isCaptured && GameState.statPointsAvailable > 0
                 
                 StatUpgradeRow(
                     label = "MAX HEALTH (HP)",
@@ -171,7 +185,7 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
                     }
                 )
                 
-                Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = HairlineDivider, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
 
                 StatUpgradeRow(
                     label = "ATTACK / STRENGTH",
@@ -185,7 +199,7 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
                     }
                 )
 
-                Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = HairlineDivider, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
 
                 StatUpgradeRow(
                     label = "DEFENSE / BARRIER",
@@ -199,7 +213,7 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
                     }
                 )
 
-                Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = HairlineDivider, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
 
                 StatUpgradeRow(
                     label = "AGILITY / SPEED",
@@ -217,66 +231,82 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
             Spacer(Modifier.height(28.dp))
 
             // Roster Management Section
-            Text(
-                text = "COMBAT DIVISION SYSTEM",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                letterSpacing = 0.5.sp,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            val activeTeamCount = GameState.capturedBeasts.count { it.inActiveTeam }
-            val inActiveTeam = beast.inActiveTeam
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .clickable {
-                        GameState.toggleRoster(context, beast.id)
-                        updateTrigger++
-                    },
-                color = if (inActiveTeam) AppleGreen.copy(0.08f) else GlassSurface,
-                shape = RoundedCornerShape(18.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (inActiveTeam) AppleGreen.copy(0.4f) else Color.White.copy(0.08f)
+            if (isCaptured) {
+                Text(
+                    text = "COMBAT DIVISION SYSTEM",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
-            ) {
-                Row(
-                    modifier = Modifier.padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (inActiveTeam) "★ REMOVE FROM BATTLE TEAM" else "✚ ASSIGN TO BATTLE TEAM",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = if (inActiveTeam) AppleGreen else TextPrimary
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (inActiveTeam) "Specimen is deployed in combat zones." else "Deploy specimen to fighting rosters ($activeTeamCount/3 filled).",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
-                    }
 
-                    Switch(
-                        checked = inActiveTeam,
-                        onCheckedChange = {
+                val activeTeamCount = GameState.capturedBeasts.count { it.inActiveTeam }
+                val inActiveTeam = beast.inActiveTeam
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .clickable {
                             GameState.toggleRoster(context, beast.id)
                             updateTrigger++
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = ObsidianBlack,
-                            checkedTrackColor = AppleGreen,
-                            uncheckedThumbColor = TextSecondary,
-                            uncheckedTrackColor = Color.White.copy(0.08f)
+                    color = if (inActiveTeam) AppleGreen.copy(0.08f) else GlassSurface,
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (inActiveTeam) AppleGreen.copy(0.4f) else Color.White.copy(0.08f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (inActiveTeam) "★ REMOVE FROM BATTLE TEAM" else "✚ ASSIGN TO BATTLE TEAM",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (inActiveTeam) AppleGreen else TextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (inActiveTeam) "Specimen is deployed in combat zones." else "Deploy specimen to fighting rosters ($activeTeamCount/3 filled).",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked = inActiveTeam,
+                            onCheckedChange = {
+                                GameState.toggleRoster(context, beast.id)
+                                updateTrigger++
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = ObsidianBlack,
+                                checkedTrackColor = AppleGreen,
+                                uncheckedThumbColor = TextSecondary,
+                                uncheckedTrackColor = Color.White.copy(0.08f)
+                            )
                         )
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = GlassSurface,
+                    border = BorderStroke(1.dp, Color.White.copy(0.08f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "This animal is still locked. Stats are visible, but capture it from scanner to use upgrades and team controls.",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
                     )
                 }
             }

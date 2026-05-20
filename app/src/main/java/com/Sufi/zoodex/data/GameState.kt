@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 data class Beast(
@@ -25,7 +26,9 @@ data class Beast(
     var maxEnergy: Int = 100,
     var currentEnergy: Int = 100,
     var allocatedPoints: Int = 0,
-    var inActiveTeam: Boolean = false
+    var inActiveTeam: Boolean = false,
+    /** Wall-clock millis when beast can fight again after arena faint. */
+    var recoverUntilMillis: Long = 0L
 ) {
     fun toJsonObject(): JSONObject {
         val obj = JSONObject()
@@ -44,6 +47,7 @@ data class Beast(
         obj.put("currentEnergy", currentEnergy)
         obj.put("allocatedPoints", allocatedPoints)
         obj.put("inActiveTeam", inActiveTeam)
+        obj.put("recoverUntilMillis", recoverUntilMillis)
         return obj
     }
 
@@ -64,7 +68,8 @@ data class Beast(
                 maxEnergy = obj.optInt("maxEnergy", 100),
                 currentEnergy = obj.optInt("currentEnergy", 100),
                 allocatedPoints = obj.optInt("allocatedPoints", 0),
-                inActiveTeam = obj.optBoolean("inActiveTeam", false)
+                inActiveTeam = obj.optBoolean("inActiveTeam", false),
+                recoverUntilMillis = obj.optLong("recoverUntilMillis", 0L)
             )
         }
     }
@@ -124,30 +129,19 @@ object GameState {
     var playerAvatar by mutableStateOf("🦊")
     var activeTerritoryBattle: ClaimedTerritory? = null
 
-    val beastTemplates = listOf(
-        BeastTemplate(1, "VOLT HOUND", "ELECTR", "A tactical cybernetic canine covered in static fur discharging high green voltage.", 120, 14, 8, 18),
-        BeastTemplate(2, "STORM EAGLE", "VOID", "A majestic and legendary predator of the high peaks, channeling gravity-defying void pressure.", 100, 12, 6, 22),
-        BeastTemplate(3, "MAGMA GORILLA", "FIRE", "A colossal primordial volcanic ape composed of pure obsidian plates and superheated lava.", 160, 20, 15, 8),
-        BeastTemplate(4, "NEON TIGER", "CYBER", "A glowing digital apex feline stalking the mainframe and composed of raw high-speed data energy flows.", 110, 16, 10, 16),
-        BeastTemplate(5, "GLITCH SPECTER", "CYBER", "A phasing network anomaly flickering in compiled compiler memory buffers.", 95, 12, 8, 14),
-        BeastTemplate(6, "SOLAR HAWK", "FIRE", "A high-altitude thermal raptor whose wings burn with intense nuclear solar fusion.", 105, 15, 7, 20),
-        BeastTemplate(7, "VOID FLYER", "VOID", "A deep-space bat specimen that uses gravitational sonar frequencies to locate targets.", 100, 11, 7, 21),
-        BeastTemplate(8, "EMERALD COBRA", "ELECTR", "A bio-engineered serpent charging green electrical voltage that releases lightning shocks.", 95, 13, 8, 15),
-        BeastTemplate(9, "STREET CAT", "CYBER", "A highly common and agile urban feline integrated with neural data tracking nodes.", 90, 11, 8, 15),
-        BeastTemplate(10, "STRAY DOG", "ELECTR", "A loyal local canine equipped with static-charge bark sensors and neural link nodes.", 100, 12, 10, 13),
-        BeastTemplate(11, "HOUSE SPARROW", "VOID", "A tiny, extremely common local bird capable of briefly phasing through solid structures.", 80, 8, 5, 22),
-        BeastTemplate(12, "COMMON CROW", "VOID", "An exceptionally intelligent scavenger bird capable of deciphering security encryption codes.", 95, 10, 7, 18),
-        BeastTemplate(13, "PARK SQUIRREL", "CYBER", "A speedy rodent that stores micro-fusion power cores instead of acorns inside urban parks.", 85, 9, 6, 20),
-        BeastTemplate(14, "MARKHOR", "ELECTR", "The grand national mountain goat of Pakistan, charging with massive corkscrew electrified horns.", 140, 18, 14, 14),
-        BeastTemplate(15, "SNOW LEOPARD", "FIRE", "The elusive ghost of northern peaks, breathing freezing volcanic steam waves.", 130, 17, 12, 16),
-        BeastTemplate(16, "HIMALAYAN IBEX", "VOID", "A magnificent mountain ibex that walks along sheer vertical cliffs using gravity-bending hooves.", 135, 15, 13, 14),
-        BeastTemplate(17, "MONAL PHEASANT", "FIRE", "A radiant avian displaying blazing solar plumes, living in sub-alpine shrub forests.", 90, 10, 8, 16),
-        BeastTemplate(18, "DESERT SAND-CAT", "FIRE", "A small desert feline that glides invisibly across glowing volcanic sand dunes.", 95, 12, 9, 17),
-        BeastTemplate(19, "INDUS DOLPHIN", "CYBER", "A rare freshwater swimmer using high-precision spatial echolocation systems to map coordinates.", 115, 13, 11, 16),
-        BeastTemplate(20, "SHELTER CORAL", "VOID", "An bio-luminescent aquatic structure feeding directly on background cosmic rays.", 150, 10, 18, 5),
-        BeastTemplate(21, "PALLAS CAT", "CYBER", "An extremely fluffy high-altitude wild feline with high-resolution telephoto ocular lenses.", 110, 13, 12, 12),
-        BeastTemplate(22, "GOLDEN EAGLE", "ELECTR", "A grand high-altitude raptor executing supersonic dives charged with high static voltage.", 115, 16, 9, 19)
-    )
+    val beastTemplates: List<BeastTemplate>
+        get() = AnimalDatabase.allAnimals.map {
+            BeastTemplate(
+                id = it.id,
+                name = it.name,
+                elementType = it.elementType,
+                description = it.description,
+                baseHp = it.baseHp,
+                baseStrength = it.baseAttack,
+                baseDefense = it.baseDefense,
+                baseAgility = it.baseSpeed
+            )
+        }
 
     val capturedBeasts = mutableStateListOf<Beast>()
     val sectors = mutableStateListOf<Sector>()
@@ -186,6 +180,16 @@ object GameState {
         } else {
             loadDefaultBeasts()
         }
+
+        // Align loaded beast IDs with the master database to prevent ID mismatches
+        capturedBeasts.forEachIndexed { index, beast ->
+            val correctAnimal = AnimalDatabase.allAnimals.find { it.name.uppercase() == beast.name.uppercase() }
+            if (correctAnimal != null && correctAnimal.id != beast.id) {
+                capturedBeasts[index] = beast.copy(id = correctAnimal.id)
+            }
+        }
+
+        ensureStarterBeastUnlocked()
 
         // Load Sectors
         val sectorsJsonStr = prefs.getString("sectors_list", null)
@@ -258,6 +262,29 @@ object GameState {
         }
 
         initialized = true
+    }
+
+    private fun ensureStarterBeastUnlocked() {
+        if (capturedBeasts.any { it.name.equals("STRAY DOG", ignoreCase = true) }) return
+        val starter = beastTemplates.find { it.name.equals("STRAY DOG", ignoreCase = true) }
+        if (starter != null) {
+            capturedBeasts.add(
+                Beast(
+                    id = starter.id,
+                    name = starter.name,
+                    nickname = starter.name,
+                    level = 1,
+                    xp = 0,
+                    elementType = starter.elementType,
+                    strength = starter.baseStrength,
+                    defense = starter.baseDefense,
+                    agility = starter.baseAgility,
+                    maxHp = starter.baseHp,
+                    currentHp = starter.baseHp,
+                    inActiveTeam = true
+                )
+            )
+        }
     }
 
     private fun loadDefaultBeasts() {
@@ -416,12 +443,37 @@ object GameState {
         when (itemType) {
             "XP_BOOSTER" -> xpBoostersOwned += 1
             "HP_REP" -> {
-                // Instantly heal fainted team members to full HP!
-                capturedBeasts.forEach { it.currentHp = it.maxHp }
+                capturedBeasts.forEach {
+                    it.currentHp = it.maxHp
+                    it.recoverUntilMillis = 0L
+                }
+            }
+            "RECOVERY_STIM" -> {
+                capturedBeasts.forEach { it.recoverUntilMillis = 0L }
             }
         }
         save(context)
         return true
+    }
+
+    fun isBeastRecovering(beast: Beast): Boolean =
+        beast.recoverUntilMillis > System.currentTimeMillis()
+
+    fun recoveryMinutesRemaining(beast: Beast): Int {
+        val left = beast.recoverUntilMillis - System.currentTimeMillis()
+        if (left <= 0L) return 0
+        return ((left + TimeUnit.MINUTES.toMillis(1) - 1) / TimeUnit.MINUTES.toMillis(1)).toInt()
+    }
+
+    /** After arena faint: 10–30 min base; crushing hits add extra downtime. */
+    fun scheduleArenaRecovery(context: Context, beastId: Int, lastHitDamage: Int, maxHp: Int) {
+        val beast = capturedBeasts.find { it.id == beastId } ?: return
+        val crushing = maxHp > 0 && lastHitDamage >= (maxHp * 0.55f)
+        val baseMinutes = Random.nextInt(10, 31)
+        val extra = if (crushing) Random.nextInt(5, 13) else 0
+        beast.recoverUntilMillis = System.currentTimeMillis() +
+            TimeUnit.MINUTES.toMillis((baseMinutes + extra).toLong())
+        save(context)
     }
 
     fun useXPBooster(context: Context): Boolean {

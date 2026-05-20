@@ -1,6 +1,7 @@
 package com.Sufi.zoodex.ui.screens
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -25,15 +26,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.data.AnimalDatabase
+import com.Sufi.zoodex.data.AnimalScanDetector
 import com.Sufi.zoodex.ui.theme.*
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.drawscope.Stroke
 
 @Composable
 fun ScanAnalysisScreen(
@@ -45,53 +45,54 @@ fun ScanAnalysisScreen(
     var analyzedAnimals by remember { mutableStateOf<List<Int>>(emptyList()) }
     var isAnalyzing by remember { mutableStateOf(true) }
     var confidence by remember { mutableFloatStateOf(0f) }
-    var analysisMessage by remember { mutableStateOf("Initializing Qwen 0.5B AI Model...") }
+    var analysisMessage by remember { mutableStateOf("Initializing on-device vision model...") }
     var detectedLabel by remember { mutableStateOf("") }
+    val telemetryLogs = remember { mutableStateListOf<String>() }
 
-    // Simulate the AI analysis progress
-    fun simulateAIAnalysis(): List<Int> {
-        // In production, this would use on-device TFLite + Qwen model
-        // For now, we simulate by returning random animals from the database
+    LaunchedEffect(capturedBitmap) {
+        if (capturedBitmap == null) return@LaunchedEffect
+        isAnalyzing = true
+        telemetryLogs.clear()
         
-        // Typical flow: image -> ML Kit Vision API -> Detect class -> Map to Zoodex animals
-        val possibleClasses = listOf(
-            "CANINE", "FELINE", "AVIAN", "REPTILE", "AQUATIC", 
-            "UNGULATE", "PRIMATE", "RODENT", "MUSTELID"
+        val logs = listOf(
+            ">> INITIALIZING BIO-SIGNATURE AI NEURAL MATRIX...",
+            ">> ML KIT OBJECT TRACKER ENGINE DEPLOYED...",
+            ">> ISOLATING TARGET REGIONS WITHIN VIEWPORT...",
+            ">> EXTRACTING DEEP CONVOLUTIONAL FEATURE TENSORS...",
+            ">> VECTOR CONFIDENCE DISTRIBUTIONS LOADED...",
+            ">> GENERATING AFFINITY VECTOR CORRELATION MATRIX...",
+            ">> COMPARATIVE DNA ENCYCLOPEDIA REGISTRY ALIGNMENT...",
+            ">> RESOLVING HIGH-DIMENSIONAL ELEMENT SPECTRUM AFFINITY..."
         )
         
-        val randomClass = possibleClasses.random()
-        val matchedAnimals = AnimalDatabase.getAnimalsByClass(randomClass)
-        
-        return matchedAnimals.take(3).map { it.id } // Return top 3 matches
-    }
-
-    // Simulate AI analysis using local Qwen model
-    LaunchedEffect(capturedBitmap) {
-        if (capturedBitmap != null) {
-            analyzedAnimals = simulateAIAnalysis()
-            isAnalyzing = false
+        for (logLine in logs) {
+            telemetryLogs.add(logLine)
+            confidence = (telemetryLogs.size.toFloat() / (logs.size + 2).toFloat()) * 0.82f
+            analysisMessage = logLine.substringAfter(">> ")
+            delay(280)
         }
-    }
-
-    LaunchedEffect(isAnalyzing) {
-        if (isAnalyzing) {
-            var progress = 0f
-            while (progress < 0.95f && isAnalyzing) {
-                delay(150)
-                progress += kotlin.random.Random.nextDouble(0.1, 0.2).toFloat()
-                confidence = progress.coerceAtMost(0.95f)
-                
-                analysisMessage = when {
-                    confidence < 0.3f -> "Scanning image frames..."
-                    confidence < 0.6f -> "Analyzing visual features..."
-                    confidence < 0.85f -> "Identifying animal characteristics..."
-                    else -> "Cross-referencing encyclopedia database..."
-                }
-                detectedLabel = when {
-                    confidence < 0.5f -> "PROCESSING"
-                    else -> "IDENTIFIED"
-                }
+        
+        try {
+            val (ids, headline) = withContext(Dispatchers.Default) {
+                AnimalScanDetector.analyze(capturedBitmap)
             }
+            analyzedAnimals = ids
+            detectedLabel = headline
+            confidence = 0.98f
+            
+            telemetryLogs.add(">> CLASSIFICATION SUCCESS: BIO-MATCH DETECTED!")
+            telemetryLogs.add(">> TOP SIGNAL: ${headline.uppercase()} — ELEMENT VECTORS CORRELATED.")
+            analysisMessage = "Bio-match confirmed: $headline"
+        } catch (e: Exception) {
+            Log.e("ScanAnalysisScreen", "Real scan failed: ${e.message}", e)
+            analyzedAnimals = listOf(3)
+            detectedLabel = "SCAN_RECOVERY"
+            confidence = 0.5f
+            telemetryLogs.add(">> ERROR: Direct match degraded. Accessing starter genomes...")
+            telemetryLogs.add(">> RETRACTED PROFILE: STRAY DOG RECOVERY PROFILE.")
+            analysisMessage = "Using recovery detection profile."
+        } finally {
+            isAnalyzing = false
         }
     }
 
@@ -209,6 +210,42 @@ fun ScanAnalysisScreen(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Premium Sci-Fi Cybernetic scrolling telemetry log console
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp)
+                                .background(Color.Black.copy(0.4f), RoundedCornerShape(8.dp))
+                                .border(0.5.dp, Color.White.copy(0.08f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                telemetryLogs.forEach { log ->
+                                    val isHighlight = log.contains("SUCCESS") || log.contains("TOP SIGNAL")
+                                    val logCol = when {
+                                        log.contains("SUCCESS") -> AppleGreen
+                                        log.contains("ERROR") -> AppleRed
+                                        isHighlight -> AppleBlue
+                                        else -> TextSecondary
+                                    }
+                                    Text(
+                                        text = log,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        color = logCol,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -365,7 +402,7 @@ fun AnimalMatchCard(animal: com.Sufi.zoodex.data.AnimalData, onCapture: () -> Un
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Divider(color = Color.White.copy(0.1f), thickness = 1.dp)
+                HorizontalDivider(color = HairlineDivider, thickness = 1.dp)
 
                 Spacer(modifier = Modifier.height(12.dp))
 

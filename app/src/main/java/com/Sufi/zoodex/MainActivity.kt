@@ -1,5 +1,6 @@
 package com.Sufi.zoodex
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -86,7 +87,7 @@ class MainActivity : ComponentActivity() {
                         composable("map") {
                             MapScreen(
                                 onBack = { navController.popBackStack() },
-                                onBattle = { navController.navigate("arena") }
+                                onBattle = { navController.navigate("arena/ai/NONE") }
                             )
                         }
 
@@ -117,8 +118,20 @@ class MainActivity : ComponentActivity() {
                             BeastDetailScreen(beastId = id, onBack = { navController.popBackStack() })
                         }
 
-                        composable("arena") {
-                            ArenaScreen(onBack = { navController.popBackStack() })
+                        composable(
+                            "arena/{mode}/{friend}",
+                            arguments = listOf(
+                                navArgument("mode") { type = NavType.StringType; defaultValue = "ai" },
+                                navArgument("friend") { type = NavType.StringType; defaultValue = "NONE" }
+                            )
+                        ) { backStack ->
+                            val mode = backStack.arguments?.getString("mode") ?: "ai"
+                            val friend = backStack.arguments?.getString("friend") ?: "NONE"
+                            ArenaScreen(
+                                navMode = mode,
+                                navFriendEncoded = friend,
+                                onBack = { navController.popBackStack() }
+                            )
                         }
 
                         composable("shop") {
@@ -128,7 +141,13 @@ class MainActivity : ComponentActivity() {
                         composable("comms") {
                             CommsScreen(
                                 onBack = { navController.popBackStack() },
-                                onLaunchBattle = { navController.navigate("arena") }
+                                onLaunchBattle = { friendTag ->
+                                    if (friendTag.isNullOrBlank()) {
+                                        navController.navigate("arena/ai/NONE")
+                                    } else {
+                                        navController.navigate("arena/friend/${Uri.encode(friendTag)}")
+                                    }
+                                }
                             )
                         }
 

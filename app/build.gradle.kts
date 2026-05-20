@@ -52,6 +52,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
@@ -75,6 +76,7 @@ dependencies {
     // ML Kit Vision
     implementation("com.google.mlkit:vision-common:17.3.0")
     implementation("com.google.mlkit:image-labeling:17.0.9")
+    implementation("com.google.mlkit:object-detection:17.0.1")
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.5.0")

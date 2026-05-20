@@ -49,6 +49,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private const val TONER_STYLE = "https://tiles.stadiamaps.com/styles/stamen_toner.json"
+/** Detailed streets / POI (OpenFreeMap) — primary map for gameplay. */
+private const val MAP_STYLE_DETAILED = "https://tiles.openfreemap.org/styles/liberty"
+private const val FALLBACK_STYLE = "https://demotiles.maplibre.org/style.json"
 private const val TAG_MAP = "TerritoryMap"
 
 // Haversine distance in metres between two lat/lng points
@@ -349,12 +352,14 @@ fun MapScreen(onBack: () -> Unit, onBattle: () -> Unit = {}) {
                 MapView(ctx).apply {
                     onCreate(null)
                     getMapAsync { mapLibre ->
-                        mapLibre.setStyle(TONER_STYLE) { _ ->
+                        // MapLibre Android SDK version in this project does not expose
+                        // addOnDidFailLoadingMapListener; use a guaranteed-render fallback style.
+                        mapLibre.setStyle(MAP_STYLE_DETAILED) { _ ->
                             mapLibreMap = mapLibre
                             mapReady = true
-                            // Enable location puck
                             mapLibre.uiSettings.isAttributionEnabled = false
                             mapLibre.uiSettings.isLogoEnabled = false
+                            statusMsg = "MAP READY — TAP START TO CLAIM"
                         }
                         // Default zoom
                         mapLibre.moveCamera(

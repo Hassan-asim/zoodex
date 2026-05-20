@@ -38,7 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -49,7 +49,6 @@ import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
 import kotlinx.coroutines.delay
 import java.io.File
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 @Composable
@@ -67,7 +66,6 @@ fun ScannerScreen(
         )
     }
 
-    var isSimulationMode by remember { mutableStateOf(!hasCameraPermission) }
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captureTriggered by remember { mutableStateOf(false) }
 
@@ -75,9 +73,6 @@ fun ScannerScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasCameraPermission = granted
-        if (!granted) {
-            isSimulationMode = true
-        }
     }
 
     LaunchedEffect(hasCameraPermission) {
@@ -108,7 +103,7 @@ fun ScannerScreen(
                     .fillMaxSize()
                     .background(ObsidianBlack)
             ) {
-                if (hasCameraPermission && !isSimulationMode) {
+                if (hasCameraPermission) {
                     CameraScannerView(
                         onCaptured = { bitmap ->
                             capturedBitmap = bitmap
@@ -117,26 +112,20 @@ fun ScannerScreen(
                         onCaptureReset = { captureTriggered = false }
                     )
                 } else {
-                    SimulatedScannerView(
-                        onCaptured = { bitmap ->
-                            capturedBitmap = bitmap
-                        },
-                        captureTriggered = captureTriggered,
-                        onCaptureReset = { captureTriggered = false }
-                    )
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Camera permission is required for real scanning.",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
 
                 // Cyber overlays (Reticle, scanning line, info panels)
                 ScannerOverlay(
-                    isSimulation = isSimulationMode,
                     onBack = onBack,
-                    onToggleMode = {
-                        if (hasCameraPermission) {
-                            isSimulationMode = !isSimulationMode
-                        } else {
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
-                    },
+                    hasCameraPermission = hasCameraPermission,
+                    onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                     onTriggerCapture = { captureTriggered = true }
                 )
             }
@@ -152,10 +141,36 @@ fun CameraScannerView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val previewView = remember { PreviewView(context) }
-    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    
+    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var cameraReady by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+        val preview = Preview.Builder().build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+        val capture = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .build()
+        
+        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+        try {
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                cameraSelector,
+                preview,
+                capture
+            )
+            imageCapture = capture
+            cameraReady = true
+        } catch (e: Exception) {
+            Log.e("CameraScannerView", "Use case binding failed", e)
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -163,184 +178,55 @@ fun CameraScannerView(
         }
     }
 
-    AndroidView(
-        factory = { previewView },
-        modifier = Modifier.fillMaxSize()
-    ) { view ->
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(view.surfaceProvider)
-            }
-
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    preview,
-                    imageCapture
-                )
-            } catch (e: Exception) {
-                Log.e("CameraScannerView", "Use case binding failed", e)
-            }
-        }, ContextCompat.getMainExecutor(context))
-    }
-
-    // Trigger photo capture
-    LaunchedEffect(captureTriggered) {
-        if (captureTriggered) {
-            val capture = imageCapture
-            if (capture != null) {
-                val outputDirectory = context.cacheDir
-                val photoFile = File(outputDirectory, "zoodex_scan_${System.currentTimeMillis()}.jpg")
-                val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-                capture.takePicture(
-                    outputOptions,
-                    ContextCompat.getMainExecutor(context),
-                    object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                            val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                            if (bitmap != null) {
-                                onCaptured(bitmap)
-                            } else {
-                                // Fallback
-                                onCaptured(createSimulatedBitmap())
-                            }
-                            onCaptureReset()
-                        }
-
-                        override fun onError(exception: ImageCaptureException) {
-                            Log.e("CameraScannerView", "Capture failed: ${exception.message}", exception)
-                            // Fallback to simulation
-                            onCaptured(createSimulatedBitmap())
-                            onCaptureReset()
-                        }
-                    }
-                )
-            } else {
-                onCaptured(createSimulatedBitmap())
-                onCaptureReset()
-            }
-        }
-    }
-}
-
-@Composable
-fun SimulatedScannerView(
-    onCaptured: (Bitmap) -> Unit,
-    captureTriggered: Boolean,
-    onCaptureReset: () -> Unit
-) {
-    // Futuristic animated background representing simulation mode
-    val infiniteTransition = rememberInfiniteTransition(label = "SimulatedScanner")
-    
-    val gridAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 0.5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "GridAlpha"
-    )
-
-    val scaleState by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(6000, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Pulse"
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .drawBehind {
-                // Draw tech grid background
-                val gridSize = 40.dp.toPx()
-                val width = size.width
-                val height = size.height
-                
-                // Draw horizontal lines
-                var y = 0f
-                while (y < height) {
-                    drawLine(
-                        color = CyberBlueStart.copy(alpha = gridAlpha),
-                        start = Offset(0f, y),
-                        end = Offset(width, y),
-                        strokeWidth = 1f
-                    )
-                    y += gridSize
-                }
-                
-                // Draw vertical lines
-                var x = 0f
-                while (x < width) {
-                    drawLine(
-                        color = CyberBlueStart.copy(alpha = gridAlpha),
-                        start = Offset(x, 0f),
-                        end = Offset(x, height),
-                        strokeWidth = 1f
-                    )
-                    x += gridSize
-                }
-
-                // Draw secondary target lines
-                drawCircle(
-                    color = CyberBlueEnd.copy(alpha = gridAlpha * 0.4f),
-                    center = center,
-                    radius = 200f * scaleState,
-                    style = Stroke(width = 2f)
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Text(
-                "SIMULATION LENS ACTIVE",
-                style = MaterialTheme.typography.labelLarge,
-                color = CyberBlueEnd,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Simulator mode allows capturing mock genetic code profiles without device camera constraints.",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                fontSize = 11.sp
-            )
-        }
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 
     LaunchedEffect(captureTriggered) {
-        if (captureTriggered) {
-            delay(500) // Small delay to simulate camera snap
-            onCaptured(createSimulatedBitmap())
+        if (!captureTriggered) return@LaunchedEffect
+        
+        // Ensure we have a valid capture instance
+        val capture = imageCapture
+        if (capture == null || !cameraReady) {
+            Log.e("CameraScannerView", "Camera not ready for capture: capture=$capture, ready=$cameraReady")
             onCaptureReset()
+            return@LaunchedEffect
         }
+        
+        val photoFile = File(context.cacheDir, "zoodex_scan_${System.currentTimeMillis()}.jpg")
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        
+        capture.takePicture(
+            outputOptions,
+            cameraExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                    if (bitmap != null) {
+                        onCaptured(bitmap)
+                    } else {
+                        Log.e("CameraScannerView", "Decoded bitmap is null from ${photoFile.absolutePath}")
+                    }
+                    onCaptureReset()
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("CameraScannerView", "Capture failed: ${exception.message}", exception)
+                    onCaptureReset()
+                }
+            }
+        )
     }
 }
 
 @Composable
 fun ScannerOverlay(
-    isSimulation: Boolean,
     onBack: () -> Unit,
-    onToggleMode: () -> Unit,
+    hasCameraPermission: Boolean,
+    onRequestPermission: () -> Unit,
     onTriggerCapture: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "OverlayEffects")
@@ -410,7 +296,7 @@ fun ScannerOverlay(
 
                 // Title
                 Text(
-                    text = if (isSimulation) "SIMULATOR CAM" else "BIO-SCANNER",
+                    text = "BIO-SCANNER",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
                     color = TextPrimary,
@@ -419,7 +305,7 @@ fun ScannerOverlay(
 
                 // Toggle Mode Button
                 Button(
-                    onClick = onToggleMode,
+                    onClick = onRequestPermission,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GlassSurface,
@@ -428,7 +314,7 @@ fun ScannerOverlay(
                     border = BorderStroke(1.dp, Color.White.copy(0.1f))
                 ) {
                     Text(
-                        text = if (isSimulation) "USE REAL CAM" else "USE SIMULATOR",
+                        text = if (hasCameraPermission) "CAM READY" else "GRANT CAMERA",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -487,7 +373,10 @@ fun ScannerOverlay(
                         .padding(6.dp)
                         .clip(CircleShape)
                         .background(CyberGradient)
-                        .clickable { onTriggerCapture() },
+                        .clickable(enabled = hasCameraPermission) { 
+                            Log.d("ScannerOverlay", "Shutter clicked")
+                            onTriggerCapture() 
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
@@ -502,46 +391,4 @@ fun ScannerOverlay(
             }
         }
     }
-}
-
-// Generate beautiful simulated procedural bitmap representing wild biometric signature
-private fun createSimulatedBitmap(): Bitmap {
-    val bitmap = Bitmap.createBitmap(800, 800, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint()
-
-    // 1. Dark obsidian background
-    paint.color = android.graphics.Color.parseColor("#0A0A0E")
-    canvas.drawRect(0f, 0f, 800f, 800f, paint)
-
-    // 2. Neon digital telemetry circles
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 2f
-    paint.color = android.graphics.Color.parseColor("#1A237E") // Deep blue
-    canvas.drawCircle(400f, 400f, 320f, paint)
-    
-    paint.color = android.graphics.Color.parseColor("#00E676") // Green scanner ring
-    paint.strokeWidth = 4f
-    canvas.drawCircle(400f, 400f, 260f, paint)
-
-    // 3. Draw cyber crosshair lines
-    paint.strokeWidth = 2f
-    paint.color = android.graphics.Color.parseColor("#00E676")
-    canvas.drawLine(100f, 400f, 700f, 400f, paint)
-    canvas.drawLine(400f, 100f, 400f, 700f, paint)
-
-    // 4. Draw simulated animal visual node contours
-    paint.style = Paint.Style.FILL
-    paint.color = android.graphics.Color.parseColor("#29B6F6") // Cyan node
-    canvas.drawCircle(400f, 300f, 16f, paint) // Head node
-    
-    canvas.drawCircle(350f, 450f, 20f, paint) // Left leg
-    canvas.drawCircle(450f, 450f, 20f, paint) // Right leg
-
-    paint.strokeWidth = 3f
-    paint.style = Paint.Style.STROKE
-    paint.color = android.graphics.Color.parseColor("#29B6F6")
-    canvas.drawRect(320f, 320f, 480f, 440f, paint) // Body frame
-
-    return bitmap
 }

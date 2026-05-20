@@ -27,7 +27,7 @@ import android.util.Log
 import android.content.Context
 
 @Composable
-fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
+fun CommsScreen(onBack: () -> Unit, onLaunchBattle: (friendCallsign: String?) -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("MESSAGES", "FRIENDS")
     val context = LocalContext.current
@@ -97,7 +97,8 @@ fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
     if (selectedFriend != null) {
         DirectMessagesView(
             friend = selectedFriend!!,
-            onBack = { selectedFriend = null }
+            onBack = { selectedFriend = null },
+            onArenaChallenge = { onLaunchBattle(selectedFriend!!.callsign) }
         )
     } else {
         Column(
@@ -262,7 +263,6 @@ fun FriendsTab(
     var addFriendCode by remember { mutableStateOf("") }
     var isAdding by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     val myCode = "ZOODEX-" + GameState.callsign.uppercase() + "-" + GameState.faction.take(3).uppercase()
@@ -496,7 +496,11 @@ fun FriendsTab(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
+fun DirectMessagesView(
+    friend: OperativeProfile,
+    onBack: () -> Unit,
+    onArenaChallenge: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { GameState.init(context) }
@@ -605,10 +609,17 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = onArenaChallenge,
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppleOrange),
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    Text("⚔ ARENA", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
             }
         }
 
-        Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp)
+        HorizontalDivider(color = HairlineDivider, thickness = 0.5.dp)
 
         // Messages List
         if (isLoading) {
@@ -666,7 +677,7 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
             }
         }
 
-        Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp)
+        HorizontalDivider(color = HairlineDivider, thickness = 0.5.dp)
 
         // Message Input
         Row(

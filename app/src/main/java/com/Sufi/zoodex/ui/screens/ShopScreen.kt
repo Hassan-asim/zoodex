@@ -207,6 +207,72 @@ fun ShopScreen(onBack: () -> Unit) {
                 onUseClick = {}
             )
 
+            Spacer(Modifier.height(14.dp))
+
+            // Shop Product Card 3: Recovery Stim (clear recovery timers only)
+            ProductItemCard(
+                title = "RECOVERY STIM INJECTOR",
+                emoji = "💉",
+                cost = 120,
+                description = "Clears squad-wide arena recovery lockouts so beasts can fight again. Does not restore HP — pair with Nano Repair if needed.",
+                canUse = false,
+                onBuyClick = {
+                    val ok = GameState.buyItem(context, "RECOVERY_STIM", 120)
+                    if (ok) {
+                        goldBalance = GameState.playerGold
+                        isSuccessAlert = true
+                        alertMessage = "✔ Recovery timers cleared. Squad ready for redeployment!"
+                    } else {
+                        isSuccessAlert = false
+                        alertMessage = "✕ Insufficient capital funds."
+                    }
+                },
+                onUseClick = {}
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // Premium currency (real money) — placeholder only
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "💎 BUY COINS (REAL MONEY)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Coming soon — secure checkout for bonus division coins.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 15.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { },
+                        enabled = false,
+                        colors = ButtonDefaults.buttonColors(
+                            disabledContainerColor = GlassSurface,
+                            disabledContentColor = TextTertiary
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "COMING SOON",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(30.dp))
         }
     }

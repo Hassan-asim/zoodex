@@ -390,7 +390,7 @@ fun CommandHubScreen(
             Triple("FACTION SHOP", "Strategic core purchase outpost", CyberBlueStart) to "shop",
             Triple("ENCYCLOPEDIA", "Beast dossier & stat allocation", CyberBlueStart) to "encyclopedia",
             Triple("SQUAD TEAMS", "Manage up to 5 tactical strike teams", CyberBlueStart) to "teams",
-            Triple("COMBAT ARENA", "Active team turn-based boss battles", CyberBlueStart) to "arena",
+            Triple("COMBAT ARENA", "Active team turn-based boss battles", CyberBlueStart) to "arena/ai/NONE",
             Triple("COMMS CHANNEL", "Encrypted global & alliance chat", CyberBlueStart) to "comms"
         )
 
