@@ -22,8 +22,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Check SharedPreferences for existing profile
-        val prefs = getSharedPreferences("zoodex", MODE_PRIVATE)
+        // Keep profile persistence aligned with GameState storage.
+        val prefs = getSharedPreferences("zoodex_save", MODE_PRIVATE)
         val savedCallsign = prefs.getString("callsign", "") ?: ""
         val savedFaction = prefs.getString("faction", "") ?: ""
         val hasProfile = savedCallsign.isNotBlank()
@@ -84,7 +84,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable("map") {
-                            MapScreen(onBack = { navController.popBackStack() })
+                            MapScreen(
+                                onBack = { navController.popBackStack() },
+                                onBattle = { navController.navigate("arena") }
+                            )
                         }
 
                         composable("scanner") {

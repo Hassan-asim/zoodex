@@ -2,6 +2,8 @@ package com.Sufi.zoodex.ui.screens
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.content.Context
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -70,13 +72,15 @@ fun ArenaScreen(onBack: () -> Unit) {
         Triple("VOID FLYER", "VOID", "🦇")
     )
     val bossInfo = remember { bossOptions.random() }
+    val isTerritoryBattle = remember { GameState.activeTerritoryBattle != null }
     val enemyBeast = remember {
         val bossLvl = GameState.playerLevel + 1
         val baseHp = 110 + (bossLvl * 15)
+        val name = if (isTerritoryBattle) "RIVAL ${GameState.activeTerritoryBattle!!.callsign.uppercase()}" else bossInfo.first
         Beast(
             id = 999,
-            name = bossInfo.first,
-            nickname = bossInfo.first,
+            name = name,
+            nickname = name,
             level = bossLvl,
             xp = 0,
             elementType = bossInfo.second,
@@ -91,8 +95,8 @@ fun ArenaScreen(onBack: () -> Unit) {
     var enemyHp by remember { mutableIntStateOf(enemyBeast.currentHp) }
 
     // Rewards bounds
-    val rewardGold = remember { 100 + (enemyBeast.level * 10) }
-    val rewardXP = remember { 80 + (enemyBeast.level * 8) }
+    val rewardGold = remember { if (isTerritoryBattle) 150 else 100 + (enemyBeast.level * 10) }
+    val rewardXP = remember { if (isTerritoryBattle) 250 else 80 + (enemyBeast.level * 8) }
 
     // Dynamic Shake/Flash hit offsets
     var playerShakeX by remember { mutableStateOf(0f) }
@@ -670,6 +674,29 @@ fun ArenaScreen(onBack: () -> Unit) {
                             onClick = {
                                 if (win) {
                                     GameState.addXPAndGold(context, rewardXP, rewardGold)
+                                    if (isTerritoryBattle) {
+                                        val battle = GameState.activeTerritoryBattle
+                                        if (battle != null) {
+                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                try {
+                                                    val myCall = GameState.callsign.ifBlank {
+                                                        val prefs = context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE)
+                                                        prefs.getString("callsign", "") ?: ""
+                                                    }
+                                                    com.Sufi.zoodex.data.SupabaseService.saveTerritoryClaim(
+                                                        callsign = myCall,
+                                                        lat = battle.lat,
+                                                        lng = battle.lng,
+                                                        radius = battle.radius,
+                                                        faction = GameState.faction
+                                                    )
+                                                } catch (e: Exception) {
+                                                    Log.e("ArenaScreen", "Error saving captured territory: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                        GameState.activeTerritoryBattle = null
+                                    }
                                 }
                                 onBack()
                             },

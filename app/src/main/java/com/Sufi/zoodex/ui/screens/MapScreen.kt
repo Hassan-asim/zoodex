@@ -1,8 +1,17 @@
 package com.Sufi.zoodex.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
+import android.os.Looper
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,518 +19,620 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import com.Sufi.zoodex.data.ClaimedTerritory
 import com.Sufi.zoodex.data.GameState
-import com.Sufi.zoodex.data.Sector
+import com.Sufi.zoodex.data.SupabaseService
 import com.Sufi.zoodex.ui.theme.*
+import com.google.android.gms.location.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.FillLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.json.JSONArray
+import org.json.JSONObject
+
+private const val TONER_STYLE = "https://tiles.stadiamaps.com/styles/stamen_toner.json"
+private const val TAG_MAP = "TerritoryMap"
+
+// Haversine distance in metres between two lat/lng points
+private fun haversineMetres(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6371000.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(dLat / 2).let { it * it } +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLon / 2).let { it * it }
+    return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+// Check if a point is inside a polygon using ray-casting
+private fun pointInPolygon(lat: Double, lon: Double, polygon: List<Pair<Double, Double>>): Boolean {
+    if (polygon.size < 3) return false
+    var inside = false
+    var j = polygon.size - 1
+    for (i in polygon.indices) {
+        val xi = polygon[i].second; val yi = polygon[i].first
+        val xj = polygon[j].second; val yj = polygon[j].first
+        if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+            inside = !inside
+        }
+        j = i
+    }
+    return inside
+}
+
+// Build a GeoJSON polygon Feature from lat/lng list
+private fun buildPolygonFeature(points: List<Pair<Double, Double>>): String {
+    val coords = JSONArray()
+    val ring = JSONArray()
+    points.forEach { (lat, lng) -> ring.put(JSONArray().put(lng).put(lat)) }
+    // close the ring
+    if (points.isNotEmpty()) ring.put(JSONArray().put(points.first().second).put(points.first().first))
+    coords.put(ring)
+    val geometry = JSONObject().apply {
+        put("type", "Polygon")
+        put("coordinates", coords)
+    }
+    return JSONObject().apply {
+        put("type", "Feature")
+        put("geometry", geometry)
+        put("properties", JSONObject())
+    }.toString()
+}
+
+// Build a GeoJSON FeatureCollection for all claimed territories
+private fun buildTerritoriesFeatureCollection(
+    claims: List<ClaimedTerritory>,
+    myCallsign: String
+): String {
+    val features = JSONArray()
+    claims.forEach { claim ->
+        // Each territory stored as lat,lng,radius → expand to a circle-ish polygon
+        val segments = 32
+        val ring = JSONArray()
+        for (i in 0 until segments) {
+            val angle = (i.toDouble() / segments) * 2 * Math.PI
+            val dLat = (claim.radius / 111320.0) * Math.cos(angle)
+            val dLng = (claim.radius / (111320.0 * Math.cos(Math.toRadians(claim.lat)))) * Math.sin(angle)
+            ring.put(JSONArray().put(claim.lng + dLng).put(claim.lat + dLat))
+        }
+        // close ring
+        val firstAngle = 0.0
+        val dLat0 = (claim.radius / 111320.0) * Math.cos(firstAngle)
+        val dLng0 = (claim.radius / (111320.0 * Math.cos(Math.toRadians(claim.lat)))) * Math.sin(firstAngle)
+        ring.put(JSONArray().put(claim.lng + dLng0).put(claim.lat + dLat0))
+
+        val coords = JSONArray().put(ring)
+        val feature = JSONObject().apply {
+            put("type", "Feature")
+            put("geometry", JSONObject().apply {
+                put("type", "Polygon")
+                put("coordinates", coords)
+            })
+            put("properties", JSONObject().apply {
+                put("callsign", claim.callsign)
+                put("faction", claim.faction)
+                put("isOwn", claim.callsign == myCallsign)
+            })
+        }
+        features.put(feature)
+    }
+    return JSONObject().apply {
+        put("type", "FeatureCollection")
+        put("features", features)
+    }.toString()
+}
 
 @Composable
-fun MapScreen(onBack: () -> Unit) {
+fun MapScreen(onBack: () -> Unit, onBattle: () -> Unit = {}) {
     val context = LocalContext.current
-    var selectedSector by remember { mutableStateOf<Sector?>(null) }
-    var conquestState by remember { mutableStateOf("IDLE") } // IDLE, CONQUERING, SUCCESS
-    var conquestProgress by remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
 
-    val nodeOffsets = listOf(
-        Pair(45.dp, 80.dp),   // Sector 1
-        Pair(220.dp, 120.dp), // Sector 2
-        Pair(100.dp, 220.dp), // Sector 3
-        Pair(240.dp, 300.dp), // Sector 4
-        Pair(60.dp, 360.dp)   // Sector 5
-    )
+    // ── Permission state ──────────────────────────────────────────────────────
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        hasPermission = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+    }
 
-    val walkedPoints = remember { mutableStateListOf<androidx.compose.ui.geometry.Offset>() }
-    var isWalkingSimulation by remember { mutableStateOf(false) }
-    var perimeterSecured by remember { mutableStateOf(false) }
+    // ── State ─────────────────────────────────────────────────────────────────
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var mapReady by remember { mutableStateOf(false) }
+    var isTracking by remember { mutableStateOf(false) }
+    var currentLat by remember { mutableStateOf(0.0) }
+    var currentLng by remember { mutableStateOf(0.0) }
+    var distanceMetres by remember { mutableStateOf(0.0) }
+    val walkedPath = remember { mutableStateListOf<Pair<Double, Double>>() }
+    var claimedTerritories by remember { mutableStateOf<List<ClaimedTerritory>>(emptyList()) }
+    var statusMsg by remember { mutableStateOf("GPS READY — TAP START TO CLAIM TERRITORY") }
+    var showBattleDialog by remember { mutableStateOf<ClaimedTerritory?>(null) }
+    var pathSaved by remember { mutableStateOf(false) }
+    var startedInsideOwnTerritory by remember { mutableStateOf(false) }
+    val sentBattleRequests = remember { mutableStateListOf<String>() }
 
-    // Simulated walk tracker launched loop
-    LaunchedEffect(isWalkingSimulation) {
-        if (isWalkingSimulation && selectedSector != null) {
-            walkedPoints.clear()
-            perimeterSecured = false
-            val index = GameState.sectors.indexOfFirst { it.id == selectedSector!!.id }
-            val (sectorX, sectorY) = nodeOffsets.getOrElse(index) { Pair(100.dp, 100.dp) }
-            
-            // Scaled central point of simulated sector outpost
-            val center = androidx.compose.ui.geometry.Offset(
-                x = sectorX.value * 2.5f + 40f,
-                y = sectorY.value * 2.5f + 40f
-            )
-            val radius = 110f
-            val stepsCount = 14
-            
-            for (step in 0..stepsCount) {
-                delay(320)
-                val angle = (step.toFloat() / stepsCount.toFloat()) * (2f * Math.PI.toFloat())
-                val nextPoint = androidx.compose.ui.geometry.Offset(
-                    x = center.x + radius * kotlin.math.cos(angle),
-                    y = center.y + radius * kotlin.math.sin(angle)
-                )
-                walkedPoints.add(nextPoint)
-            }
-            delay(500)
-            perimeterSecured = true
-            isWalkingSimulation = false
-            conquestState = "SUCCESS"
-            
-            // Execute conquest in dynamic persistence!
-            GameState.conquestSector(context, selectedSector!!.id)
-            delay(1200)
-            
-            conquestState = "IDLE"
-            selectedSector = GameState.sectors.find { it.id == selectedSector!!.id }
+    val myCallsign = remember {
+        GameState.callsign.ifBlank {
+            context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE)
+                .getString("callsign", "OPERATIVE") ?: "OPERATIVE"
+        }
+    }
+    val myFaction = remember {
+        GameState.faction.ifBlank {
+            context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE)
+                .getString("faction", "UNCLAIMED") ?: "UNCLAIMED"
         }
     }
 
-    // Sync GameState
+    // ── GPS location client ───────────────────────────────────────────────────
+    val fusedLocationClient = remember {
+        LocationServices.getFusedLocationProviderClient(context)
+    }
+    val locationCallback = remember {
+        object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                val newLat = loc.latitude
+                val newLng = loc.longitude
+
+                // Distance since last point
+                if (walkedPath.isNotEmpty() && isTracking) {
+                    val last = walkedPath.last()
+                    val d = haversineMetres(last.first, last.second, newLat, newLng)
+                    if (d >= 3.0) { // only add if moved >3m
+                        walkedPath.add(Pair(newLat, newLng))
+                        distanceMetres += d
+                    }
+                }
+                currentLat = newLat
+                currentLng = newLng
+
+                // Pan camera
+                mapLibreMap?.animateCamera(
+                    CameraUpdateFactory.newLatLng(LatLng(newLat, newLng)), 500
+                )
+
+                // Check if current position overlaps any claimed rival territory
+                claimedTerritories.firstOrNull { claim ->
+                    claim.callsign != myCallsign &&
+                    haversineMetres(newLat, newLng, claim.lat, claim.lng) < claim.radius
+                }?.let { rivalClaim ->
+                    if (showBattleDialog == null) {
+                        showBattleDialog = rivalClaim
+                    }
+                    if (!sentBattleRequests.contains(rivalClaim.id)) {
+                        sentBattleRequests.add(rivalClaim.id)
+                        scope.launch(Dispatchers.IO) {
+                            SupabaseService.createBattleRequest(
+                                challengerCallsign = myCallsign,
+                                defenderCallsign = rivalClaim.callsign,
+                                territoryId = rivalClaim.id,
+                                lat = newLat,
+                                lng = newLng
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Load territories from Supabase on launch ──────────────────────────────
     LaunchedEffect(Unit) {
-        GameState.init(context)
-    }
-
-    // Conquest simulation loop
-    LaunchedEffect(conquestState) {
-        if (conquestState == "CONQUERING" && selectedSector != null) {
-            while (conquestProgress < 1.0f) {
-                delay(40)
-                conquestProgress += 0.05f
+        MapLibre.getInstance(context)
+        if (!hasPermission) {
+            permLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+        scope.launch(Dispatchers.IO) {
+            try {
+                val claims = SupabaseService.fetchTerritoryClaims()
+                withContext(Dispatchers.Main) { claimedTerritories = claims }
+            } catch (e: Exception) {
+                Log.e(TAG_MAP, "Error fetching territories: ${e.message}")
             }
-            conquestState = "SUCCESS"
-            delay(1200)
-            
-            // Execute conquest in dynamic persistence!
-            GameState.conquestSector(context, selectedSector!!.id)
-            
-            // Reset state
-            conquestState = "IDLE"
-            conquestProgress = 0f
-            // Force re-draw by cloning current selection reference
-            selectedSector = GameState.sectors.find { it.id == selectedSector!!.id }
         }
     }
 
-    val mapAnim = rememberInfiniteTransition(label = "map_ping")
-    val pulseScale by mapAnim.animateFloat(
-        initialValue = 0.8f, targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse"
-    )
-    val pulseAlpha by mapAnim.animateFloat(
-        initialValue = 0.9f, targetValue = 0.1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "alpha"
-    )
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(ObsidianBlack)
-    ) {
-        // Shared Screen Header
-        ScreenHeader(title = "TERRITORY CONQUEST", onBack = onBack)
-
-        // Subheader showing total owned status
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "GPS SECTORS ACTIVE",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary
-            )
-            
-            val ownedSectors = GameState.sectors.count { it.faction == GameState.faction }
-            Text(
-                text = "$ownedSectors / ${GameState.sectors.size} CONQUERED",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = AppleBlue
-            )
-        }
-
-        // Virtual Radar Map Viewport
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF07070B))
-                .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(24.dp))
-        ) {
-            
-            // Map Grid Overlay
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 45.dp.toPx()
-                val lineAlpha = 0.03f
-                // Vertical lines
-                var x = 0f
-                while (x < size.width) {
-                    drawLine(Color.White, start = androidx.compose.ui.geometry.Offset(x, 0f), end = androidx.compose.ui.geometry.Offset(x, size.height), alpha = lineAlpha)
-                    x += step
-                }
-                // Horizontal lines
-                var y = 0f
-                while (y < size.height) {
-                    drawLine(Color.White, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(size.width, y), alpha = lineAlpha)
-                    y += step
-                }
-
-                // Radar ping ring
-                drawCircle(
-                    color = AppleBlue.copy(alpha = 0.05f),
-                    radius = size.minDimension / 3.5f
-                )
-                drawCircle(
-                    color = AppleBlue.copy(alpha = 0.03f),
-                    radius = size.minDimension / 1.8f
-                )
-
-                // Draw Walked Perimeter Polyline
-                if (walkedPoints.isNotEmpty()) {
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(walkedPoints.first().x, walkedPoints.first().y)
-                        for (i in 1 until walkedPoints.size) {
-                            lineTo(walkedPoints[i].x, walkedPoints[i].y)
-                        }
-                        if (perimeterSecured) {
-                            close()
-                        }
-                    }
-                    // Draw filled territory if secured
-                    if (perimeterSecured) {
-                        drawPath(
-                            path = path,
-                            color = NeonCyan.copy(0.12f)
-                        )
-                    }
-                    // Draw outer border path
-                    drawPath(
-                        path = path,
-                        color = NeonCyan,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(
-                            width = 2.dp.toPx()
-                        )
-                    )
-                }
-            }
-
-            // Radar Scan sweep overlay
-            val scanAngle by mapAnim.animateFloat(
-                initialValue = 0f, targetValue = 360f,
-                animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing)),
-                label = "scan_angle"
-            )
-            // Visual simulated sweeps inside Canvas
-            Box(
-                Modifier
-                    .size(240.dp)
-                    .align(Alignment.Center)
-                    .alpha(0.06f)
-                    .background(
-                        Brush.sweepGradient(
-                            colors = listOf(Color.Transparent, AppleBlue, Color.Transparent)
-                        ),
-                        CircleShape
-                    )
-            )
-
-            GameState.sectors.forEachIndexed { index, sector ->
-                val (offsetX, offsetY) = nodeOffsets.getOrElse(index) { Pair(100.dp, 100.dp) }
-                val isSelected = selectedSector?.id == sector.id
-                
-                val nodeColor = when (sector.faction) {
-                    "UNCLAIMED" -> TextSecondary
-                    "NEON_SYNDICATE" -> NeonCyan
-                    "VOID_RUNNERS" -> NeonViolet
-                    else -> NeonRed
-                }
-
-                // Map Dot Node Interactive Component
-                Box(
-                    modifier = Modifier
-                        .offset(x = offsetX, y = offsetY)
-                        .clickable {
-                            selectedSector = sector
-                            conquestState = "IDLE"
-                            conquestProgress = 0f
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Pulsing select indicator ring
-                    if (isSelected) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .scale(pulseScale)
-                                .alpha(pulseAlpha)
-                                .background(nodeColor.copy(0.4f), CircleShape)
-                        )
-                    }
-
-                    // Inner main solid dot
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .background(nodeColor, CircleShape)
-                            .border(2.5.dp, Color.White, CircleShape)
-                    )
-
-                    // Floating name banner above node
-                    Box(
-                        modifier = Modifier
-                            .offset(y = (-20).dp)
-                            .background(ObsidianBlack.copy(0.7f), RoundedCornerShape(4.dp))
-                            .border(0.5.dp, Color.White.copy(0.08f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = sector.name,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = nodeColor
-                        )
-                    }
-                }
-            }
-
-            // Radar static alert text
-            Text(
-                text = "✦ AR RADAR ACTIVE",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = AppleBlue.copy(0.5f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(16.dp)
-            )
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Selected Sector detailed drawer cards panel
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            if (selectedSector != null) {
-                val sector = selectedSector!!
-                val isMyFaction = sector.faction == GameState.faction
-                
-                val factionColor = when (sector.faction) {
-                    "UNCLAIMED" -> TextSecondary
-                    "NEON_SYNDICATE" -> NeonCyan
-                    "VOID_RUNNERS" -> NeonViolet
-                    else -> NeonRed
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (conquestState == "CONQUERING") {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                progress = conquestProgress,
-                                color = AppleBlue,
-                                strokeWidth = 5.dp,
-                                modifier = Modifier.size(52.dp)
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            Text(
-                                text = "OVERWRITING TERRITORY CORES...",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = AppleBlue
-                            )
-                        }
-                    } else if (conquestState == "SUCCESS") {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-                        ) {
-                            Text(
-                                text = "🏆 SECTOR ACQUIRED",
-                                fontSize = 34.sp
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text = "DEployed Faction Node Complete!",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = AppleGreen
-                            )
-                        }
-                    } else {
-                        // Standard details state
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = sector.name,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = TextPrimary
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "Threat Rating: ${"✦".repeat(sector.threatLevel)}${"✧".repeat(5 - sector.threatLevel)}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AppleOrange
-                                )
-                            }
-
-                            // Current Owner Badge
-                            Box(
-                                modifier = Modifier
-                                    .background(factionColor.copy(0.12f), RoundedCornerShape(8.dp))
-                                    .border(0.5.dp, factionColor.copy(0.4f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = sector.faction.replace("_", " "),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = factionColor
-                                )
-                            }
-                        }
-
-                        Divider(color = Color.White.copy(0.06f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 12.dp))
-
-                        // Rewards row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text("XP REWARD", style = MaterialTheme.typography.labelMedium, fontSize = 8.sp, color = TextSecondary)
-                                Text("+${sector.rewardXP} XP", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = AppleBlue)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("COIN REWARD", style = MaterialTheme.typography.labelMedium, fontSize = 8.sp, color = TextSecondary)
-                                Text("+${sector.rewardGold} COINS 🪙", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = AppleOrange)
-                            }
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-
-                        if (isMyFaction) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(AppleGreen.copy(0.12f), RoundedCornerShape(24.dp))
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "✔ CONQUERED BY YOUR ALLIANCE DIVISION",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AppleGreen
-                                )
-                            }
-                        } else {
-                            if (isWalkingSimulation) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(AppleOrange.copy(0.12f), RoundedCornerShape(24.dp))
-                                        .padding(vertical = 12.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "🛰️ SIMULATING GPS WALK PERIMETER [${walkedPoints.size}/15]...",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AppleOrange
-                                    )
-                                }
-                            } else {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Button(
-                                        onClick = { isWalkingSimulation = true },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = NeonCyan,
-                                            contentColor = ObsidianBlack
-                                        ),
-                                        shape = RoundedCornerShape(24.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(48.dp)
-                                    ) {
-                                        Text(
-                                            text = "🛰️ GPS WALK",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ObsidianBlack
-                                        )
-                                    }
-
-                                    Button(
-                                        onClick = { conquestState = "CONQUERING" },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = AppleBlue,
-                                            contentColor = ObsidianBlack
-                                        ),
-                                        shape = RoundedCornerShape(24.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(48.dp)
-                                    ) {
-                                        Text(
-                                            text = "⚡ INSTANT",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ObsidianBlack
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    // ── Draw territories on map whenever ready or territories change ──────────
+    LaunchedEffect(mapReady, claimedTerritories) {
+        if (!mapReady) return@LaunchedEffect
+        val map = mapLibreMap ?: return@LaunchedEffect
+        val style = map.style ?: return@LaunchedEffect
+        try {
+            val geoJson = buildTerritoriesFeatureCollection(claimedTerritories, myCallsign)
+            val existingSource = style.getSource("territories-source") as? GeoJsonSource
+            if (existingSource != null) {
+                existingSource.setGeoJson(geoJson)
             } else {
-                // Initial prompt state card
-                GlassCard(
+                style.addSource(GeoJsonSource("territories-source", geoJson))
+                style.addLayer(FillLayer("territories-fill", "territories-source").apply {
+                    setProperties(
+                        PropertyFactory.fillColor(
+                            org.maplibre.android.style.expressions.Expression.match(
+                                org.maplibre.android.style.expressions.Expression.get("isOwn"),
+                                org.maplibre.android.style.expressions.Expression.literal(true),
+                                org.maplibre.android.style.expressions.Expression.literal("#00FFCC"),
+                                org.maplibre.android.style.expressions.Expression.literal("#FF3366")
+                            )
+                        ),
+                        PropertyFactory.fillOpacity(0.25f)
+                    )
+                })
+                style.addLayer(LineLayer("territories-line", "territories-source").apply {
+                    setProperties(
+                        PropertyFactory.lineColor(
+                            org.maplibre.android.style.expressions.Expression.match(
+                                org.maplibre.android.style.expressions.Expression.get("isOwn"),
+                                org.maplibre.android.style.expressions.Expression.literal(true),
+                                org.maplibre.android.style.expressions.Expression.literal("#00FFCC"),
+                                org.maplibre.android.style.expressions.Expression.literal("#FF3366")
+                            )
+                        ),
+                        PropertyFactory.lineWidth(2.5f)
+                    )
+                })
+            }
+        } catch (e: Exception) {
+            Log.e(TAG_MAP, "Error drawing territories: ${e.message}")
+        }
+    }
+
+    // ── Draw live walk path on map ────────────────────────────────────────────
+    LaunchedEffect(walkedPath.size) {
+        if (!mapReady || walkedPath.size < 2) return@LaunchedEffect
+        val map = mapLibreMap ?: return@LaunchedEffect
+        val style = map.style ?: return@LaunchedEffect
+        try {
+            val lineCoords = JSONArray().apply {
+                walkedPath.forEach { (lat, lng) -> put(JSONArray().put(lng).put(lat)) }
+            }
+            val lineGeo = JSONObject().apply {
+                put("type", "Feature")
+                put("geometry", JSONObject().apply {
+                    put("type", "LineString")
+                    put("coordinates", lineCoords)
+                })
+                put("properties", JSONObject())
+            }.toString()
+
+            val existingLine = style.getSource("walk-path-source") as? GeoJsonSource
+            if (existingLine != null) {
+                existingLine.setGeoJson(lineGeo)
+            } else {
+                style.addSource(GeoJsonSource("walk-path-source", lineGeo))
+                style.addLayer(LineLayer("walk-path-line", "walk-path-source").apply {
+                    setProperties(
+                        PropertyFactory.lineColor("#00E5FF"),
+                        PropertyFactory.lineWidth(4f),
+                        PropertyFactory.lineOpacity(0.9f)
+                    )
+                })
+            }
+        } catch (e: Exception) {
+            Log.e(TAG_MAP, "Walk path draw error: ${e.message}")
+        }
+    }
+
+    // ── Main UI ───────────────────────────────────────────────────────────────
+    Box(modifier = Modifier.fillMaxSize().background(ObsidianBlack)) {
+
+        // MapView via AndroidView
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                MapLibre.getInstance(ctx)
+                MapView(ctx).apply {
+                    onCreate(null)
+                    getMapAsync { mapLibre ->
+                        mapLibre.setStyle(TONER_STYLE) { _ ->
+                            mapLibreMap = mapLibre
+                            mapReady = true
+                            // Enable location puck
+                            mapLibre.uiSettings.isAttributionEnabled = false
+                            mapLibre.uiSettings.isLogoEnabled = false
+                        }
+                        // Default zoom
+                        mapLibre.moveCamera(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(30.3753, 69.3451), 5.0)
+                        )
+                    }
+                }
+            },
+            update = { mv -> mv.onStart() }
+        )
+
+        // Top header bar
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ObsidianBlack.copy(alpha = 0.85f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Back
+                    Text(
+                        "← BACK",
+                        color = AppleBlue,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.clickable { onBack() }
+                    )
+                    Text(
+                        "⚡ TERRITORY CONQUEST",
+                        color = TextPrimary,
+                        fontWeight = FontWeight.ExtraBold,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontSize = 13.sp
+                    )
+                    // Stats
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "${(distanceMetres).toInt()}m walked",
+                            color = NeonCyan,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp
+                        )
+                        Text(
+                            "${claimedTerritories.count { it.callsign == myCallsign }} zones",
+                            color = AppleGreen,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+
+            // Status ticker
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(NeonCyan.copy(alpha = 0.08f))
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = statusMsg,
+                    color = NeonCyan,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+            }
+        }
+
+        // Bottom control panel
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .background(ObsidianBlack.copy(alpha = 0.88f))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // GPS info row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (currentLat != 0.0) "📍 ${String.format("%.5f", currentLat)}, ${String.format("%.5f", currentLng)}" else "📍 Acquiring GPS...",
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp
+                )
+                Text(
+                    text = "${walkedPath.size} GPS points",
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp
+                )
+            }
+
+            // Start / Stop controls
+            if (!hasPermission) {
+                Button(
+                    onClick = {
+                        permLauncher.launch(arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        ))
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppleOrange),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Text("GRANT GPS PERMISSION", fontWeight = FontWeight.ExtraBold, color = ObsidianBlack)
+                }
+            } else if (!isTracking) {
+                Button(
+                    onClick = {
+                        if (!hasPermission) return@Button
+                        walkedPath.clear()
+                        distanceMetres = 0.0
+                        pathSaved = false
+                        isTracking = true
+                        startedInsideOwnTerritory = claimedTerritories.any { claim ->
+                            claim.callsign == myCallsign &&
+                                haversineMetres(currentLat, currentLng, claim.lat, claim.lng) <= claim.radius
+                        }
+                        if (currentLat != 0.0 && currentLng != 0.0) {
+                            walkedPath.add(Pair(currentLat, currentLng))
+                        }
+                        statusMsg = "🛰️ GPS TRACKING ACTIVE — WALK YOUR TERRITORY"
+                        startGpsTracking(fusedLocationClient, locationCallback)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
                     Text(
-                        text = "SELECT MAP SECTOR RADAR NODE TO BEGIN",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                        text = if (walkedPath.size >= 3 && pathSaved) "🛰️ START NEW TERRITORY" else "▶ START TRACKING",
+                        fontWeight = FontWeight.ExtraBold,
+                        color = ObsidianBlack,
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                // STOP button
+                Button(
+                    onClick = {
+                        isTracking = false
+                        fusedLocationClient.removeLocationUpdates(locationCallback)
+                        scope.launch {
+                            if (walkedPath.size >= 2 && distanceMetres >= 12.0) {
+                                statusMsg = "⏳ PROCESSING TERRITORY CLAIM..."
+                                val lat = walkedPath.map { it.first }.average()
+                                val lng = walkedPath.map { it.second }.average()
+                                val radius = (distanceMetres / (2 * Math.PI)).coerceAtLeast(18.0)
+                                val ok = withContext(Dispatchers.IO) {
+                                    SupabaseService.saveOrExpandTerritoryClaim(
+                                        callsign = myCallsign,
+                                        lat = lat,
+                                        lng = lng,
+                                        radius = radius,
+                                        faction = myFaction,
+                                        expandExisting = startedInsideOwnTerritory
+                                    )
+                                }
+                                if (ok) {
+                                    pathSaved = true
+                                    val updated = withContext(Dispatchers.IO) { SupabaseService.fetchTerritoryClaims() }
+                                    claimedTerritories = updated
+                                    statusMsg = if (startedInsideOwnTerritory) {
+                                        "✅ TERRITORY EXPANDED (${distanceMetres.toInt()}m tracked)"
+                                    } else {
+                                        "✅ NEW TERRITORY CLAIMED (${distanceMetres.toInt()}m tracked)"
+                                    }
+                                } else {
+                                    statusMsg = "❌ CLAIM SAVE FAILED — CHECK CONNECTION"
+                                }
+                            } else {
+                                statusMsg = "⏹ TOO FEW POINTS — WALK MORE NEXT TIME"
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonRed),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Text(
+                        "⏹ STOP TRACKING  (${walkedPath.size} pts • ${(distanceMetres).toInt()}m)",
+                        fontWeight = FontWeight.ExtraBold,
+                        color = ObsidianBlack,
+                        fontSize = 13.sp
                     )
                 }
             }
         }
+
+        // ── Battle Challenge Dialog ───────────────────────────────────────────
+        showBattleDialog?.let { rival ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(ObsidianBlack.copy(alpha = 0.75f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(24.dp)
+                        .background(Color(0xFF0E0E18), RoundedCornerShape(20.dp))
+                        .border(1.dp, NeonRed.copy(0.5f), RoundedCornerShape(20.dp))
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("⚔️", fontSize = 42.sp)
+                    Text(
+                        "RIVAL TERRITORY DETECTED",
+                        color = NeonRed,
+                        fontWeight = FontWeight.ExtraBold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "You have entered ${rival.callsign}'s claimed zone!\nDefeat them to take over this territory.",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        "Faction: ${rival.faction.replace("_", " ")}",
+                        color = NeonViolet,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { showBattleDialog = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(0.08f)),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("RETREAT", color = TextSecondary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = {
+                                GameState.activeTerritoryBattle = rival
+                                showBattleDialog = null
+                                onBattle()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonRed),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("⚔️ BATTLE!", color = ObsidianBlack, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+@SuppressLint("MissingPermission")
+private fun startGpsTracking(
+    client: FusedLocationProviderClient,
+    callback: LocationCallback
+) {
+    val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L)
+        .setMinUpdateDistanceMeters(3f)
+        .build()
+    client.requestLocationUpdates(request, callback, Looper.getMainLooper())
 }

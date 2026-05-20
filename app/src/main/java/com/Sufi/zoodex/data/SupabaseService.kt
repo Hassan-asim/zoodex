@@ -133,10 +133,12 @@ object SupabaseService {
         receiverCallsign: String,
         content: String
     ): Boolean {
+        val s = senderCallsign.trim().uppercase()
+        val r = receiverCallsign.trim().uppercase()
         return try {
             val messageData = JSONObject().apply {
-                put("sender_callsign", senderCallsign)
-                put("receiver_callsign", receiverCallsign)
+                put("sender_callsign", s)
+                put("receiver_callsign", r)
                 put("content", content)
                 put("is_read", false)
             }
@@ -161,9 +163,15 @@ object SupabaseService {
         callsign2: String,
         limit: Int = 50
     ): List<OperativeMessage> {
+        val c1 = callsign1.trim().uppercase()
+        val c2 = callsign2.trim().uppercase()
+        if (c1.isBlank() || c2.isBlank()) {
+            Log.e(TAG, "fetchMessages: callsings must not be blank")
+            return emptyList()
+        }
         return try {
             val response = makeRequest(
-                url = "$SUPABASE_URL/operative_messages?or=(and(sender_callsign.eq.$callsign1,receiver_callsign.eq.$callsign2),and(sender_callsign.eq.$callsign2,receiver_callsign.eq.$callsign1))&order=created_at.asc&limit=$limit",
+                url = "$SUPABASE_URL/operative_messages?or=(and(sender_callsign.eq.$c1,receiver_callsign.eq.$c2),and(sender_callsign.eq.$c2,receiver_callsign.eq.$c1))&order=created_at.asc&limit=$limit",
                 method = "GET"
             )
 
@@ -376,4 +384,160 @@ object SupabaseService {
             }
         }
     }
+
+    suspend fun saveTerritoryClaim(
+        callsign: String,
+        lat: Double,
+        lng: Double,
+        radius: Double,
+        faction: String
+    ): Boolean {
+        val statusStr = "$lat,$lng,$radius,$faction"
+        val id = UUID.randomUUID().toString()
+        return try {
+            val claimData = JSONObject().apply {
+                put("id", id)
+                put("requester_callsign", "TERRITORY")
+                put("friend_callsign", callsign)
+                put("status", statusStr)
+            }
+            val result = makeRequest(
+                url = "$SUPABASE_URL/friendships",
+                method = "POST",
+                body = claimData.toString(),
+                isInsert = true
+            )
+            result != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving territory claim: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun fetchTerritoryClaims(): List<ClaimedTerritory> {
+        return try {
+            val response = makeRequest(
+                url = "$SUPABASE_URL/friendships?requester_callsign=eq.TERRITORY",
+                method = "GET"
+            )
+            val claims = mutableListOf<ClaimedTerritory>()
+            if (response != null) {
+                val array = JSONArray(response)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val id = obj.optString("id", UUID.randomUUID().toString())
+                    val callsign = obj.getString("friend_callsign")
+                    val status = obj.getString("status")
+                    val createdAt = obj.optString("created_at", "")
+                    
+                    // Parse status: lat,lng,radius,faction
+                    val parts = status.split(",")
+                    if (parts.size >= 4) {
+                        val lat = parts[0].toDoubleOrNull() ?: 0.0
+                        val lng = parts[1].toDoubleOrNull() ?: 0.0
+                        val radius = parts[2].toDoubleOrNull() ?: 50.0
+                        val faction = parts[3]
+                        claims.add(ClaimedTerritory(id, callsign, lat, lng, radius, faction, createdAt))
+                    }
+                }
+            }
+            claims
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching territory claims: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun saveOrExpandTerritoryClaim(
+        callsign: String,
+        lat: Double,
+        lng: Double,
+        radius: Double,
+        faction: String,
+        expandExisting: Boolean
+    ): Boolean {
+        return try {
+            val allClaims = fetchTerritoryClaims()
+            val myClaims = allClaims.filter { it.callsign.equals(callsign, ignoreCase = true) }
+            val latestMine = myClaims.maxByOrNull { it.createdAt }
+            val finalLat: Double
+            val finalLng: Double
+            val finalRadius: Double
+
+            if (expandExisting && latestMine != null) {
+                finalLat = latestMine.lat
+                finalLng = latestMine.lng
+                finalRadius = (latestMine.radius + (radius * 0.65)).coerceAtLeast(latestMine.radius + 12.0)
+            } else {
+                finalLat = lat
+                finalLng = lng
+                finalRadius = radius
+            }
+
+            saveTerritoryClaim(
+                callsign = callsign,
+                lat = finalLat,
+                lng = finalLng,
+                radius = finalRadius,
+                faction = faction
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in saveOrExpandTerritoryClaim: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun createBattleRequest(
+        challengerCallsign: String,
+        defenderCallsign: String,
+        territoryId: String,
+        lat: Double,
+        lng: Double
+    ): Boolean {
+        val payload = listOf(
+            challengerCallsign.trim().uppercase(),
+            territoryId,
+            lat.toString(),
+            lng.toString(),
+            getISO8601Timestamp()
+        ).joinToString("|")
+        return try {
+            val reqData = JSONObject().apply {
+                put("id", UUID.randomUUID().toString())
+                put("requester_callsign", "BATTLE_REQUEST")
+                put("friend_callsign", defenderCallsign.trim().uppercase())
+                put("status", payload)
+            }
+            val result = makeRequest(
+                url = "$SUPABASE_URL/friendships",
+                method = "POST",
+                body = reqData.toString(),
+                isInsert = true
+            )
+            result != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating battle request: ${e.message}")
+            false
+        }
+    }
 }
+
+data class ClaimedTerritory(
+    val id: String,
+    val callsign: String,
+    val lat: Double,
+    val lng: Double,
+    val radius: Double,
+    val faction: String,
+    val createdAt: String = ""
+)
+
+data class BattleRequest(
+    val id: String,
+    val challengerCallsign: String,
+    val defenderCallsign: String,
+    val territoryId: String,
+    val lat: Double,
+    val lng: Double,
+    val createdAt: String = ""
+)

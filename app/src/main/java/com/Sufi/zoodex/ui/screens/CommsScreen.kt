@@ -22,7 +22,9 @@ import com.Sufi.zoodex.data.*
 import com.Sufi.zoodex.ui.theme.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import kotlinx.coroutines.*
+import kotlinx.coroutines.isActive
 import android.util.Log
+import android.content.Context
 
 @Composable
 fun CommsScreen(onBack: () -> Unit, onLaunchBattle: () -> Unit) {
@@ -497,30 +499,54 @@ fun FriendsTab(
 fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { GameState.init(context) }
     
     var messages by remember { mutableStateOf<List<OperativeMessage>>(emptyList()) }
     var currentText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberLazyListState()
+    val myCallsign = remember {
+        GameState.callsign.ifBlank {
+            val prefs = context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE)
+            prefs.getString("callsign", "") ?: ""
+        }.uppercase()
+    }
 
     // Load and poll messages on launch and periodically
     LaunchedEffect(friend.callsign) {
         isLoading = true
         var isFirst = true
-        while (true) {
+        while (isActive) {
             try {
-                val loadedMessages = SupabaseService.fetchMessages(GameState.callsign, friend.callsign)
+                if (myCallsign.isBlank()) {
+                    loadError = "Your profile callsign is missing. Re-open setup/profile first."
+                    isLoading = false
+                    delay(2500)
+                    continue
+                }
+                val loadedMessages = withTimeoutOrNull(10000) {
+                    SupabaseService.fetchMessages(myCallsign, friend.callsign.uppercase())
+                } ?: emptyList()
                 // Update only if counts or last messages differ
                 if (loadedMessages.size != messages.size || loadedMessages.lastOrNull()?.id != messages.lastOrNull()?.id) {
                     messages = loadedMessages
                     if (isFirst && messages.isNotEmpty()) {
-                        delay(100) // Small delay to let UI render before scroll
-                        scrollState.animateScrollToItem(messages.size - 1)
+                        scope.launch {
+                            delay(100) // Small delay to let UI render before scroll
+                            try {
+                                scrollState.animateScrollToItem(messages.size - 1)
+                            } catch (se: Exception) {
+                                Log.e("DirectMessages", "Error scrolling: ${se.message}")
+                            }
+                        }
                     }
                 }
+                loadError = null
             } catch (e: Exception) {
                 Log.e("DirectMessages", "Error polling messages: ${e.message}")
+                loadError = "Message sync error. Retrying..."
             }
             isLoading = false
             isFirst = false
@@ -531,7 +557,13 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
     // Auto-scroll on new messages
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            scrollState.animateScrollToItem(messages.size - 1)
+            scope.launch {
+                try {
+                    scrollState.animateScrollToItem(messages.size - 1)
+                } catch (se: Exception) {
+                    Log.e("DirectMessages", "Error auto-scrolling: ${se.message}")
+                }
+            }
         }
     }
 
@@ -587,6 +619,21 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = AppleBlue)
+            }
+        } else if (loadError != null && messages.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    loadError ?: "Unable to load messages",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AppleRed,
+                    textAlign = TextAlign.Center
+                )
             }
         } else if (messages.isEmpty()) {
             Box(
@@ -661,14 +708,14 @@ fun DirectMessagesView(friend: OperativeProfile, onBack: () -> Unit) {
                                 isSending = true
                                 try {
                                     val success = SupabaseService.sendMessage(
-                                        GameState.callsign,
-                                        friend.callsign,
+                                        myCallsign,
+                                        friend.callsign.uppercase(),
                                         currentText
                                     )
                                     if (success) {
                                         val newMessage = OperativeMessage(
-                                            senderCallsign = GameState.callsign,
-                                            receiverCallsign = friend.callsign,
+                                            senderCallsign = myCallsign,
+                                            receiverCallsign = friend.callsign.uppercase(),
                                             content = currentText,
                                             isRead = false
                                         )

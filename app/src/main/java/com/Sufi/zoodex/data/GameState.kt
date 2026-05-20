@@ -122,6 +122,7 @@ object GameState {
     var xpBoostersOwned: Int = 0
     var isDarkTheme by mutableStateOf(true)
     var playerAvatar by mutableStateOf("🦊")
+    var activeTerritoryBattle: ClaimedTerritory? = null
 
     val beastTemplates = listOf(
         BeastTemplate(1, "VOLT HOUND", "ELECTR", "A tactical cybernetic canine covered in static fur discharging high green voltage.", 120, 14, 8, 18),
