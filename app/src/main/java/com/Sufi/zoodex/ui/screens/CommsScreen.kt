@@ -510,6 +510,7 @@ fun DirectMessagesView(
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var showOfflineAlert by remember { mutableStateOf(false) }
     val scrollState = rememberLazyListState()
     val myCallsign = remember {
         GameState.callsign.ifBlank {
@@ -571,6 +572,34 @@ fun DirectMessagesView(
         }
     }
 
+    // Auto-launch Arena if challenge is accepted in real-time chat sync
+    LaunchedEffect(messages) {
+        val lastMessage = messages.lastOrNull()
+        if (lastMessage != null && lastMessage.content == "[BATTLE_ACCEPT:arena_challenge]") {
+            delay(1200)
+            onArenaChallenge()
+        }
+    }
+
+    if (showOfflineAlert) {
+        AlertDialog(
+            onDismissRequest = { showOfflineAlert = false },
+            title = { Text("⚠️ OFFLINE DEPLOYMENT BLOCKED", color = AppleRed, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp) },
+            text = { Text("Target operative (${friend.callsign}) is currently offline. Challenges can only be issued to online operatives.", color = TextPrimary) },
+            confirmButton = {
+                Button(
+                    onClick = { showOfflineAlert = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppleRed, contentColor = TextPrimary)
+                ) {
+                    Text("ACKNOWLEDGE", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = GlassSurface,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.border(1.dp, AppleRed.copy(0.4f), RoundedCornerShape(16.dp))
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -610,7 +639,28 @@ fun DirectMessagesView(
                 }
                 Spacer(Modifier.weight(1f))
                 TextButton(
-                    onClick = onArenaChallenge,
+                    onClick = {
+                        if (!friend.online) {
+                            showOfflineAlert = true
+                        } else {
+                            scope.launch {
+                                val success = SupabaseService.sendMessage(
+                                    myCallsign,
+                                    friend.callsign.uppercase(),
+                                    "[BATTLE_REQUEST:arena_challenge]"
+                                )
+                                if (success) {
+                                    val newMessage = OperativeMessage(
+                                        senderCallsign = myCallsign,
+                                        receiverCallsign = friend.callsign.uppercase(),
+                                        content = "[BATTLE_REQUEST:arena_challenge]",
+                                        isRead = false
+                                    )
+                                    messages = messages + newMessage
+                                }
+                            }
+                        }
+                    },
                     colors = ButtonDefaults.textButtonColors(contentColor = AppleOrange),
                     modifier = Modifier.padding(end = 4.dp)
                 ) {
@@ -672,7 +722,46 @@ fun DirectMessagesView(
             ) {
                 items(messages) { msg ->
                     val isMyMessage = msg.senderCallsign == GameState.callsign
-                    ChatBubble(message = msg, isMyMessage = isMyMessage)
+                    when {
+                        msg.content.startsWith("[BATTLE_REQUEST:") -> {
+                            BattleRequestCard(
+                                message = msg,
+                                isMyMessage = isMyMessage,
+                                friendName = friend.callsign,
+                                onAccept = {
+                                    scope.launch {
+                                        val ok = SupabaseService.sendMessage(
+                                            myCallsign,
+                                            friend.callsign.uppercase(),
+                                            "[BATTLE_ACCEPT:arena_challenge]"
+                                        )
+                                        if (ok) {
+                                            // Launch battle locally
+                                            onArenaChallenge()
+                                        }
+                                    }
+                                },
+                                onDecline = {
+                                    scope.launch {
+                                        SupabaseService.sendMessage(
+                                            myCallsign,
+                                            friend.callsign.uppercase(),
+                                            "[BATTLE_DECLINE:arena_challenge]"
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                        msg.content.startsWith("[BATTLE_ACCEPT:") -> {
+                            BattleAcceptCard(message = msg, isMyMessage = isMyMessage, friendName = friend.callsign)
+                        }
+                        msg.content.startsWith("[BATTLE_DECLINE:") -> {
+                            BattleDeclineCard(message = msg, isMyMessage = isMyMessage, friendName = friend.callsign)
+                        }
+                        else -> {
+                            ChatBubble(message = msg, isMyMessage = isMyMessage)
+                        }
+                    }
                 }
             }
         }
@@ -817,6 +906,174 @@ fun ChatBubble(message: OperativeMessage, isMyMessage: Boolean) {
                     fontWeight = FontWeight.Bold,
                     color = CyberBlueStart,
                     fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BattleRequestCard(
+    message: OperativeMessage,
+    isMyMessage: Boolean,
+    friendName: String,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .width(260.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(
+                    if (isMyMessage) Brush.horizontalGradient(listOf(AppleOrange.copy(0.12f), Color.Black.copy(0.2f)))
+                    else Brush.horizontalGradient(listOf(AppleOrange.copy(0.25f), GlassSurface))
+                )
+                .border(1.dp, AppleOrange.copy(0.5f), RoundedCornerShape(16.dp))
+                .padding(14.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "⚔ COGNITIVE COMBAT LINK",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.sp,
+                    color = AppleOrange,
+                    letterSpacing = 1.sp
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = if (isMyMessage) "Waiting for $friendName to accept the battle request..." 
+                           else "$friendName challenges you to an instant Arena duel!",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+                
+                if (!isMyMessage) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onAccept,
+                            colors = ButtonDefaults.buttonColors(containerColor = AppleGreen, contentColor = ObsidianBlack),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(32.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("ACCEPT ⚔", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                        
+                        Button(
+                            onClick = onDecline,
+                            colors = ButtonDefaults.buttonColors(containerColor = AppleRed, contentColor = TextPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(32.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("DECLINE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        color = AppleOrange,
+                        trackColor = Color.White.copy(0.08f),
+                        modifier = Modifier.fillMaxWidth().height(2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BattleAcceptCard(
+    message: OperativeMessage,
+    isMyMessage: Boolean,
+    friendName: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .width(260.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.horizontalGradient(listOf(AppleGreen.copy(0.15f), GlassSurface)))
+                .border(1.dp, AppleGreen.copy(0.5f), RoundedCornerShape(16.dp))
+                .padding(12.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "✓ CHALLENGE APPROVED",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.sp,
+                    color = AppleGreen,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (isMyMessage) "You accepted the challenge! Linking neural parameters..." 
+                           else "$friendName accepted the challenge! Initializing Arena Sync...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BattleDeclineCard(
+    message: OperativeMessage,
+    isMyMessage: Boolean,
+    friendName: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .width(260.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(0.3f))
+                .border(1.dp, AppleRed.copy(0.3f), RoundedCornerShape(16.dp))
+                .padding(10.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "✗ CHALLENGE DECLINED",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    color = AppleRed,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (isMyMessage) "You declined the combat link." 
+                           else "$friendName declined the combat link request.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
                 )
             }
         }

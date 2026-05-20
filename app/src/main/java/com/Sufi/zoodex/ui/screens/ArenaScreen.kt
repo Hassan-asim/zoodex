@@ -260,7 +260,6 @@ fun ArenaScreen(
         val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: return
         val eIdx = activeEnemyIndex
         val curEnemyHp = enemyHpList.getOrNull(eIdx) ?: return
-        val maxEnemyHp = enemyMaxHpList.getOrNull(eIdx) ?: 1
 
         toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 85)
         scope.launch {
@@ -271,15 +270,90 @@ fun ArenaScreen(
             enemyShakeX = 0f
         }
 
-        val baseDmg = 25 + (currentBeast.strength * 1.2).toInt()
-        val dmg = (baseDmg - (enemy.defense / 2)).coerceAtLeast(12) + (1..10).random()
-        val newEh = (curEnemyHp - dmg).coerceAtLeast(0)
+        // Element Weakness/Strength Matchup Matrix
+        val attackerElement = currentBeast.elementType.uppercase()
+        val defenderElement = enemy.elementType.uppercase()
+        val multiplier = when {
+            attackerElement == "FIRE" && defenderElement == "CYBER" -> 1.5f
+            attackerElement == "FIRE" && defenderElement == "WATER" -> 0.5f
+            attackerElement == "WATER" && defenderElement == "FIRE" -> 1.5f
+            attackerElement == "WATER" && defenderElement == "ELECTR" -> 0.5f
+            attackerElement == "ELECTR" && defenderElement == "WATER" -> 1.5f
+            attackerElement == "ELECTR" && defenderElement == "EARTH" -> 0.5f
+            attackerElement == "EARTH" && defenderElement == "ELECTR" -> 1.5f
+            attackerElement == "EARTH" && defenderElement == "VOID" -> 0.5f
+            attackerElement == "VOID" && defenderElement == "CYBER" -> 0.75f
+            attackerElement == "VOID" -> 1.25f
+            attackerElement == "CYBER" && defenderElement == "VOID" -> 1.4f
+            else -> 1.0f
+        }
+
+        var finalDmg = 0
+        var moveLog = ""
+        
+        when (skillName) {
+            "CORE SLASH" -> {
+                val baseDmg = 22 + (currentBeast.strength * 1.1).toInt()
+                finalDmg = ((baseDmg - (enemy.defense / 2.5)).coerceAtLeast(10) * multiplier).toInt() + (1..6).random()
+                moveLog = ">> ${currentBeast.name} uses CORE SLASH! A cybernetic blade strikes for $finalDmg damage."
+            }
+            "PLASMA BURST" -> {
+                val baseDmg = 30 + (currentBeast.strength * 1.5).toInt()
+                finalDmg = ((baseDmg - (enemy.defense / 2)).coerceAtLeast(14) * multiplier).toInt() + (1..10).random()
+                moveLog = ">> ${currentBeast.name} unleashes PLASMA BURST! Superheated heat rays blast ${enemy.name} for $finalDmg damage."
+                if ((1..4).random() == 1) {
+                    val recoil = (finalDmg * 0.15f).toInt()
+                    val pIdx = activeIndex
+                    val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
+                    val newPh = (curPh - recoil).coerceAtLeast(1)
+                    if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
+                    moveLog += " Recoil backfires for $recoil damage!"
+                }
+            }
+            "SHIELD SHELL" -> {
+                val baseDmg = 12 + (currentBeast.strength * 0.6).toInt()
+                finalDmg = ((baseDmg - (enemy.defense / 3)).coerceAtLeast(6) * multiplier).toInt()
+                val selfHeal = 20 + (currentBeast.defense * 0.5).toInt()
+                val pIdx = activeIndex
+                val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
+                val maxPh = playerMaxHpList.getOrNull(pIdx) ?: currentBeast.maxHp
+                val newPh = (curPh + selfHeal).coerceAtMost(maxPh)
+                if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
+                moveLog = ">> ${currentBeast.name} deploys SHIELD SHELL! Deals $finalDmg dmg, repairs $selfHeal HP."
+            }
+            "TECH REBOOT" -> {
+                val pIdx = activeIndex
+                val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
+                val maxPh = playerMaxHpList.getOrNull(pIdx) ?: currentBeast.maxHp
+                val isLowHp = (curPh.toFloat() / maxPh.toFloat()) <= 0.35f
+                
+                if (isLowHp) {
+                    val baseDmg = 45 + (currentBeast.strength * 2.0).toInt()
+                    finalDmg = ((baseDmg - (enemy.defense / 2)).coerceAtLeast(25) * multiplier).toInt()
+                    moveLog = ">> EMERGENCY OVERCLOCK! ${currentBeast.name} executes TECH REBOOT at low health! CRITICAL BLOW strikes for $finalDmg damage!"
+                } else {
+                    val heal = 35
+                    val newPh = (curPh + heal).coerceAtMost(maxPh)
+                    if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
+                    finalDmg = 8
+                    moveLog = ">> ${currentBeast.name} activates TECH REBOOT. Restored $heal HP, chips ${enemy.name} for 8 damage."
+                }
+            }
+        }
+
+        if (multiplier > 1.1f) {
+            moveLog += " [ELEMENTAL ADVANTAGE!]"
+        } else if (multiplier < 0.9f) {
+            moveLog += " [ELEMENT RESISTED!]"
+        }
+
+        val newEh = (curEnemyHp - finalDmg).coerceAtLeast(0)
         if (eIdx < enemyHpList.size) enemyHpList[eIdx] = newEh
 
-        logList = logList + ">> [Slot #${activeIndex + 1}] ${currentBeast.name} uses $skillName! Deals $dmg to ${enemy.name}."
+        logList = logList + moveLog
 
         if (newEh <= 0) {
-            logList = logList + ">> ${enemy.name} neutralized."
+            logList = logList + ">> ${enemy.name} core fainted."
             if (activeEnemyIndex + 1 < enemyTeamBeasts.size) {
                 activeEnemyIndex++
                 logList = logList + ">> NEXT HOSTILE: ${enemyTeamBeasts[activeEnemyIndex].name}"
