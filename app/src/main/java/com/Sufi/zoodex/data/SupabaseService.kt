@@ -394,10 +394,11 @@ object SupabaseService {
     ): Boolean {
         val statusStr = "$lat,$lng,$radius,$faction"
         val id = UUID.randomUUID().toString()
+        val uniqueReq = "TERRITORY_${id.take(8)}"
         return try {
             val claimData = JSONObject().apply {
                 put("id", id)
-                put("requester_callsign", "TERRITORY")
+                put("requester_callsign", uniqueReq)
                 put("friend_callsign", callsign)
                 put("status", statusStr)
             }
@@ -417,7 +418,7 @@ object SupabaseService {
     suspend fun fetchTerritoryClaims(): List<ClaimedTerritory> {
         return try {
             val response = makeRequest(
-                url = "$SUPABASE_URL/friendships?requester_callsign=eq.TERRITORY",
+                url = "$SUPABASE_URL/friendships?requester_callsign=like.TERRITORY*",
                 method = "GET"
             )
             val claims = mutableListOf<ClaimedTerritory>()

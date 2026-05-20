@@ -20,6 +20,18 @@ import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.vector.ImageVector
+
+data class OperationItem(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val color: Color,
+    val route: String
+)
+
 @Composable
 fun CommandHubScreen(
     callsign: String,
@@ -69,7 +81,7 @@ fun CommandHubScreen(
                         .fillMaxSize()
                         .padding(24.dp)
                 ) {
-                    // Profile Header Card (Clickable to Edit Faction/Avatar!)
+                    // Profile Header Card
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -79,7 +91,6 @@ fun CommandHubScreen(
                             .padding(20.dp)
                     ) {
                         Column {
-                            // Avatar Placeholder/Icon
                             Box(
                                 modifier = Modifier
                                     .size(60.dp)
@@ -112,7 +123,7 @@ fun CommandHubScreen(
                                     color = factionColor
                                 )
                                 Text(
-                                    text = "⚙️ EDIT PROFILE",
+                                    text = "⚙️ EDIT",
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = AppleBlue,
@@ -124,9 +135,8 @@ fun CommandHubScreen(
 
                     Spacer(Modifier.height(24.dp))
 
-                    // Player Stats List
                     Text(
-                        text = "OPERATIVE METADATA",
+                        text = "METADATA",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextSecondary,
@@ -134,14 +144,14 @@ fun CommandHubScreen(
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    val stats = listOf(
-                        "Rank Level" to "LEVEL ${GameState.playerLevel}",
-                        "Active Faction Gold" to "${GameState.playerGold} COINS",
-                        "Secured Specimen Size" to "$totalBeasts / 17 SPECIES",
-                        "Conquered Outposts" to "$conqueredSectors SEC"
+                    val sidebarStats = listOf(
+                        "Level" to "${GameState.playerLevel}",
+                        "Gold" to "${GameState.playerGold}",
+                        "Beasts" to "$totalBeasts / 17",
+                        "Sectors" to "$conqueredSectors"
                     )
 
-                    stats.forEach { (label, value) ->
+                    sidebarStats.forEach { (label, value) ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -155,7 +165,6 @@ fun CommandHubScreen(
 
                     Spacer(Modifier.weight(1f))
 
-                    // Theme Configurer Row
                     HorizontalDivider(color = Color.White.copy(0.08f), thickness = 1.dp)
                     Spacer(Modifier.height(16.dp))
 
@@ -168,19 +177,12 @@ fun CommandHubScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "DARK THEME MODE",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = if (localDarkTheme) "Energy Efficient" else "High Contrast Light",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
-                            )
-                        }
+                        Text(
+                            text = "DARK MODE",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
                         Switch(
                             checked = localDarkTheme,
                             onCheckedChange = { isChecked ->
@@ -190,9 +192,7 @@ fun CommandHubScreen(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = factionColor,
-                                checkedTrackColor = factionColor.copy(0.3f),
-                                uncheckedThumbColor = Color.Gray,
-                                uncheckedTrackColor = Color.Gray.copy(0.3f)
+                                checkedTrackColor = factionColor.copy(0.3f)
                             )
                         )
                     }
@@ -208,7 +208,7 @@ fun CommandHubScreen(
                         ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("CLOSE RADAR SYSTEM")
+                        Text("BACK TO RADAR")
                     }
                 }
             }
@@ -231,7 +231,6 @@ fun CommandHubScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Menu Hamburger Icon Button
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -240,12 +239,7 @@ fun CommandHubScreen(
                             .clickable { scope.launch { drawerState.open() } },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "☰",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = TextPrimary
-                        )
+                        Icon(imageVector = Icons.Filled.Menu, contentDescription = "Menu", tint = TextPrimary)
                     }
                     Spacer(Modifier.width(12.dp))
                     Column {
@@ -254,11 +248,10 @@ fun CommandHubScreen(
                             style = MaterialTheme.typography.displayLarge,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.5).sp,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Operative: $activeCallsign",
+                            text = activeCallsign,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                             color = TextSecondary
@@ -266,247 +259,154 @@ fun CommandHubScreen(
                     }
                 }
 
-            // Faction Pill Badge
-            Box(
-                modifier = Modifier
-                    .background(factionColor.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                    .border(1.dp, factionColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = activeFaction.replace("_", " "),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = factionColor
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Level Progression Glass Card
-        GlassCard(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "OPERATIVE PROGRESSION",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Level ${GameState.playerLevel}",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = TextPrimary
-                    )
-                }
-
-                // XP Display
-                Text(
-                    text = "${GameState.playerXP} / ${xpRequired} XP",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = AppleBlue
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Progress bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
-            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(xpProgress.coerceIn(0f, 1f))
-                        .fillMaxHeight()
-                        .background(
-                            brush = CyberGradient,
-                            shape = RoundedCornerShape(3.dp)
-                        )
-                )
+                        .background(factionColor.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                        .border(1.dp, factionColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = activeFaction.replace("_", " "),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = factionColor
+                    )
+                }
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Progress Card
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "RANK L${GameState.playerLevel}",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "${GameState.playerXP} / ${xpRequired} XP",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AppleBlue
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(xpProgress.coerceIn(0f, 1f))
+                                .fillMaxHeight()
+                                .background(brush = CyberGradient, shape = RoundedCornerShape(3.dp))
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Stats Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                StatCard("COINS", "${GameState.playerGold}", CyberBlueStart, Modifier.weight(1f))
+                StatCard("TEAM", "$activeTeamSize / 3", CyberBlueStart, Modifier.weight(1f))
+                StatCard("SPECIES", "$totalBeasts", CyberBlueStart, Modifier.weight(1f))
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            Text(
+                text = "OPERATIONS",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextSecondary,
+                modifier = Modifier.padding(start = 4.dp, bottom = 16.dp)
+            )
+
+            val operations = listOf(
+                OperationItem("SCAN", "AREA", Icons.Filled.QrCodeScanner, CyberBlueStart, "scanner"),
+                OperationItem("MAP", "WORLD", Icons.Filled.Map, CyberBlueStart, "map"),
+                OperationItem("SHOP", "FACTION", Icons.Filled.ShoppingCart, CyberBlueStart, "shop"),
+                OperationItem("DEX", "BEASTS", Icons.Filled.Book, CyberBlueStart, "encyclopedia"),
+                OperationItem("SQUAD", "TEAMS", Icons.Filled.Groups, CyberBlueStart, "teams"),
+                OperationItem("ARENA", "COMBAT", Icons.Filled.SportsEsports, CyberBlueStart, "arena/ai/NONE"),
+                OperationItem("COMMS", "LINK", Icons.Filled.Wifi, CyberBlueStart, "comms")
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OperationCard(operations[0], Modifier.weight(1f)) { onNavigate(operations[0].route) }
+                    OperationCard(operations[1], Modifier.weight(1f)) { onNavigate(operations[1].route) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OperationCard(operations[3], Modifier.weight(1f)) { onNavigate(operations[3].route) }
+                    OperationCard(operations[5], Modifier.weight(1f)) { onNavigate(operations[5].route) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OperationCard(operations[2], Modifier.weight(1f)) { onNavigate(operations[2].route) }
+                    OperationCard(operations[4], Modifier.weight(1f)) { onNavigate(operations[4].route) }
+                    OperationCard(operations[6], Modifier.weight(1f)) { onNavigate(operations[6].route) }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
         }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Status Stats Grid Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Gold
-            StatCard(
-                label = "CAPITAL COINS",
-                value = "${GameState.playerGold}",
-                accentColor = CyberBlueStart,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Active Team
-            StatCard(
-                label = "ACTIVE TEAM",
-                value = "$activeTeamSize / 3",
-                accentColor = CyberBlueStart,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Beast Count
-            StatCard(
-                label = "BEAST DICTION",
-                value = "$totalBeasts",
-                accentColor = CyberBlueStart,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(28.dp))
-
-        Text(
-            text = "FIELD OPERATIONS",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = TextSecondary,
-            letterSpacing = 0.5.sp,
-            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
-        )
-
-        // Navigation Menu
-        val operations = listOf(
-            Triple("SCAN AREA", "AR Capture view & real camera lens", CyberBlueStart) to "scanner",
-            Triple("TERRITORY CONQUEST", "Claim sectors for $faction", CyberBlueStart) to "map",
-            Triple("FACTION SHOP", "Strategic core purchase outpost", CyberBlueStart) to "shop",
-            Triple("ENCYCLOPEDIA", "Beast dossier & stat allocation", CyberBlueStart) to "encyclopedia",
-            Triple("SQUAD TEAMS", "Manage up to 5 tactical strike teams", CyberBlueStart) to "teams",
-            Triple("COMBAT ARENA", "Active team turn-based boss battles", CyberBlueStart) to "arena/ai/NONE",
-            Triple("COMMS CHANNEL", "Encrypted global & alliance chat", CyberBlueStart) to "comms"
-        )
-
-        operations.forEach { (info, route) ->
-            val (title, subtitle, color) = info
-            NavCard(
-                title = title,
-                subtitle = subtitle,
-                color = color,
-                onClick = { onNavigate(route) }
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-
-        Spacer(Modifier.height(32.dp))
     }
-}
 
     if (showEditProfileDialog) {
         var tempAvatar by remember { mutableStateOf(GameState.playerAvatar) }
         var tempFaction by remember { mutableStateOf(activeFaction) }
-
         val factions = listOf(
-            Triple("NEON_SYNDICATE", NeonCyan, "Cybernetic Forest Division"),
-            Triple("VOID_RUNNERS", NeonViolet, "Void Slag Anomaly Division"),
-            Triple("IRON_VANGUARD", NeonRed, "Volcanic Slag Power Division")
+            Triple("NEON_SYNDICATE", NeonCyan, "Cyber Forest"),
+            Triple("VOID_RUNNERS", NeonViolet, "Void Slag"),
+            Triple("IRON_VANGUARD", NeonRed, "Volcanic Slag")
         )
 
         AlertDialog(
             onDismissRequest = { showEditProfileDialog = false },
-            title = {
-                Text(
-                    text = "RE-CONFIGURE PROFILE",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = TextPrimary
-                )
-            },
+            title = { Text("RE-CONFIGURE", fontWeight = FontWeight.ExtraBold, color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(
-                        text = "CALLSIGN: ${activeCallsign.uppercase()} [READ-ONLY]",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary
-                    )
-
-                    Column {
-                        Text(
-                            text = "SELECT OPERATIVE AVATAR",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        val avatars = listOf("🦊", "🐯", "🦅", "🐉", "🐺", "🦁", "🐼", "🦄")
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            avatars.forEach { avatar ->
-                                val isSelected = tempAvatar == avatar
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSelected) AppleBlue.copy(0.15f) else GlassSurface)
-                                        .border(
-                                            1.5.dp,
-                                            if (isSelected) AppleBlue else Color.White.copy(0.08f),
-                                            CircleShape
-                                        )
-                                        .clickable { tempAvatar = avatar },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(avatar, fontSize = 16.sp)
-                                }
-                            }
+                    val avatars = listOf("🦊", "🐯", "🦅", "🐉", "🐺", "🦁", "🐼", "🦄")
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        avatars.forEach { avatar ->
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (tempAvatar == avatar) AppleBlue.copy(0.15f) else GlassSurface)
+                                    .border(1.dp, if (tempAvatar == avatar) AppleBlue else Color.White.copy(0.08f), CircleShape)
+                                    .clickable { tempAvatar = avatar },
+                                contentAlignment = Alignment.Center
+                            ) { Text(avatar, fontSize = 16.sp) }
                         }
                     }
-
                     Column {
-                        Text(
-                            text = "SELECT DIVISION ALLIANCE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
                         factions.forEach { (name, color, label) ->
-                            val isSelected = tempFaction == name
                             Surface(
                                 onClick = { tempFaction = name },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) color.copy(0.08f) else GlassSurface,
-                                border = BorderStroke(1.dp, if (isSelected) color else Color.White.copy(0.06f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
+                                color = if (tempFaction == name) color.copy(0.08f) else GlassSurface,
+                                border = BorderStroke(1.dp, if (tempFaction == name) color else Color.White.copy(0.06f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .background(color, CircleShape)
-                                    )
+                                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = name.replace("_", " "),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) color else TextPrimary
-                                    )
+                                    Text(text = name.replace("_", " "), fontWeight = FontWeight.Bold, color = if (tempFaction == name) color else TextPrimary)
                                 }
                             }
                         }
@@ -514,25 +414,10 @@ fun CommandHubScreen(
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        GameState.setProfile(context, activeCallsign, tempFaction, tempAvatar)
-                        showEditProfileDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppleBlue, contentColor = ObsidianBlack),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("SAVE CHANGES", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                Button(
-                    onClick = { showEditProfileDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = TextSecondary),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("CANCEL")
-                }
+                Button(onClick = {
+                    GameState.setProfile(context, activeCallsign, tempFaction, tempAvatar)
+                    showEditProfileDialog = false
+                }, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue)) { Text("SAVE", fontWeight = FontWeight.Bold) }
             },
             containerColor = ObsidianBlack,
             shape = RoundedCornerShape(16.dp)
@@ -540,14 +425,8 @@ fun CommandHubScreen(
     }
 }
 
-
 @Composable
-fun StatCard(
-    label: String,
-    value: String,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
+fun StatCard(label: String, value: String, accentColor: Color, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.clip(RoundedCornerShape(16.dp)),
         color = GlassSurface,
@@ -558,73 +437,28 @@ fun StatCard(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold,
-                color = accentColor,
-                fontSize = 20.sp
-            )
+            Text(text = value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = accentColor, fontSize = 20.sp)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
+            Text(text = label, style = MaterialTheme.typography.labelMedium, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextSecondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }
 
 @Composable
-fun NavCard(
-    title: String,
-    subtitle: String,
-    color: Color,
-    onClick: () -> Unit
-) {
+fun OperationCard(item: OperationItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
+        modifier = modifier.height(100.dp).clip(RoundedCornerShape(16.dp)).clickable { onClick() },
         color = GlassSurface,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = color
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
+        Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Box(modifier = Modifier.size(36.dp).background(item.color.copy(0.1f), CircleShape).border(1.dp, item.color.copy(0.3f), CircleShape), contentAlignment = Alignment.Center) {
+                Icon(imageVector = item.icon, contentDescription = item.title, tint = TextPrimary, modifier = Modifier.size(24.dp))
             }
-
-            // Premium iOS style arrow indicator
-            Text(
-                text = "→",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary.copy(alpha = 0.6f),
-                modifier = Modifier.padding(start = 12.dp)
-            )
+            Spacer(Modifier.height(8.dp))
+            Text(text = item.title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, color = item.color, letterSpacing = 1.sp)
+            Text(text = item.subtitle, style = MaterialTheme.typography.bodySmall, fontSize = 9.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
         }
     }
 }

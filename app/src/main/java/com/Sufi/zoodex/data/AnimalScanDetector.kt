@@ -85,14 +85,13 @@ object AnimalScanDetector {
         }
     }
 
-    suspend fun analyze(bitmap: Bitmap): Pair<List<Int>, String> = withContext(Dispatchers.Default) {
+    suspend fun analyzeStrict(bitmap: Bitmap): Triple<List<Int>, String, Boolean> = withContext(Dispatchers.Default) {
         Log.d(TAG, "Starting analyze process for bitmap ${bitmap.width}x${bitmap.height}")
         try {
             val classHints = linkedSetOf<String>()
             val allLabelTexts = mutableListOf<String>()
 
             val objects = detectObjects(bitmap)
-            Log.d(TAG, "Detected ${objects.size} objects")
             for (obj in objects) {
                 for (lbl in obj.labels) {
                     allLabelTexts.add(lbl.text)
@@ -102,9 +101,7 @@ object AnimalScanDetector {
                 if (box != null) {
                     val cropped = crop(bitmap, box) ?: continue
                     val cropLabels = labelBitmap(cropped, 0.22f)
-                    Log.d(TAG, "Crop at $box has ${cropLabels.size} labels")
                     for (l in cropLabels) {
-                        Log.d(TAG, "Crop Label: ${l.text} (${l.confidence})")
                         allLabelTexts.add(l.text)
                         classHints.addAll(hintsFromLabelText(l.text))
                     }
@@ -112,53 +109,31 @@ object AnimalScanDetector {
             }
 
             val fullLabels = labelBitmap(bitmap, 0.22f)
-            Log.d(TAG, "Full image has ${fullLabels.size} labels")
             for (l in fullLabels) {
-                Log.d(TAG, "Full Label: ${l.text} (${l.confidence})")
                 allLabelTexts.add(l.text)
                 classHints.addAll(hintsFromLabelText(l.text))
             }
 
-            Log.d(TAG, "Final classHints: $classHints")
-            Log.d(TAG, "All detected labels: ${allLabelTexts.distinct()}")
-
-            // Robust Matcher 1: Primary match based on taxonomical class hints
-            val classMatched = classHints
+            val matched = classHints
                 .flatMap { AnimalDatabase.getAnimalsByClass(it) }
                 .distinctBy { it.id }
+                .take(3)
 
-            // Robust Matcher 2: Secondary match based on direct keyword matching inside label strings
-            val keywordMatched = allLabelTexts.flatMap { label ->
-                val labelLower = label.lowercase()
-                AnimalDatabase.allAnimals.filter { animal ->
-                    val nameLower = animal.name.lowercase()
-                    labelLower.contains(nameLower) || nameLower.contains(labelLower) ||
-                    animal.description.lowercase().contains(labelLower)
-                }
-            }.distinctBy { it.id }
+            val headline = allLabelTexts.firstOrNull()?.uppercase() ?: "UNKNOWN_SIGNAL"
+            
+            // Strictly check if any detected hint actually belongs to the encyclopedia
+            val existsInEncyclopedia = classHints.any { hint -> 
+                AnimalDatabase.allAnimals.any { it.encyclopediaClass.equals(hint, true) }
+            }
 
-            // Combine both matching strategies to ensure high success rates
-            val matched = (classMatched + keywordMatched).distinctBy { it.id }.take(3)
-
-            val headline = allLabelTexts.firstOrNull()?.uppercase() ?: "ANIMAL_SIGNAL"
-            if (matched.isNotEmpty()) {
-                Log.d(TAG, "Matched ${matched.size} animals: ${matched.map { it.name }}")
-                return@withContext matched.map { it.id } to headline
+            if (existsInEncyclopedia && matched.isNotEmpty()) {
+                return@withContext Triple(matched.map { it.id }, headline, true)
             }
             
-            Log.d(TAG, "No specific matches found, returning deterministic defaults based on visual features")
-            // Return deterministically mapped beasts instead of hardcoded numbers to ensure robust outputs
-            val backup = if (allLabelTexts.any { it.lowercase().contains("water") || it.lowercase().contains("lake") || it.lowercase().contains("river") }) {
-                listOf(23, 25, 26) // Aquatic otters/catfish
-            } else if (allLabelTexts.any { it.lowercase().contains("forest") || it.lowercase().contains("tree") || it.lowercase().contains("plant") }) {
-                listOf(19, 31, 35) // Street cat / badger / bear
-            } else {
-                listOf(3, 19, 24) // Stray Dog, Street Cat, Kingfisher
-            }
-            backup to headline
+            Triple(emptyList(), headline, false)
         } catch (e: Exception) {
             Log.e(TAG, "analyze error: ${e.message}", e)
-            listOf(3) to "SCAN_RECOVERY"
+            Triple(emptyList(), "SCAN_RECOVERY", false)
         }
     }
 }

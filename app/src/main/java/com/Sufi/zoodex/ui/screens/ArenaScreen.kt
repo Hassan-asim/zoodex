@@ -1,27 +1,14 @@
 package com.Sufi.zoodex.ui.screens
 
 import android.app.Activity
-import android.content.pm.ActivityInfo
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
 import android.util.Log
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,20 +17,27 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.data.OperativeProfile
 import com.Sufi.zoodex.data.SupabaseService
+import com.Sufi.zoodex.util.IconUtils
 import com.Sufi.zoodex.ui.theme.*
+import androidx.compose.ui.res.painterResource
+import com.Sufi.zoodex.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -51,13 +45,13 @@ import kotlinx.coroutines.withContext
 
 enum class ArenaPhase { PRE_MATCH, SEARCHING, PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
 
-private data class MoveSlot(val name: String, val icon: String, val desc: String, val color: androidx.compose.ui.graphics.Color)
+private data class MoveSlot(val name: String, val icon: String, val desc: String, val color: Color)
 
 private val arenaMoveSlots = listOf(
-    MoveSlot("CORE SLASH",   "⚔️", "Physical Strike",       androidx.compose.ui.graphics.Color(0xFF0A84FF)),
-    MoveSlot("PLASMA BURST", "💥", "High DMG + Recoil",    androidx.compose.ui.graphics.Color(0xFFFF9F0A)),
-    MoveSlot("SHIELD SHELL", "🛡️", "Low DMG + Self Heal",  androidx.compose.ui.graphics.Color(0xFF30D158)),
-    MoveSlot("TECH REBOOT",  "🔄", "Heal / Overclock",     androidx.compose.ui.graphics.Color(0xFFBF5AF2))
+    MoveSlot("CORE SLASH",   "⚔️", "Physical Strike",       Color(0xFF0A84FF)),
+    MoveSlot("PLASMA BURST", "💥", "High DMG + Recoil",    Color(0xFFFF9F0A)),
+    MoveSlot("SHIELD SHELL", "🛡️", "Low DMG + Self Heal",  Color(0xFF30D158)),
+    MoveSlot("TECH REBOOT",  "🔄", "Heal / Overclock",     Color(0xFFBF5AF2))
 )
 
 private enum class OpponentMode { AI, FRIEND }
@@ -71,7 +65,6 @@ fun ArenaScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Programmatically Lock Screen Orientation to Landscape Fixed
     DisposableEffect(Unit) {
         val activity = context as? Activity
         val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -82,7 +75,7 @@ fun ArenaScreen(
     }
 
     var phase by remember { mutableStateOf(ArenaPhase.PRE_MATCH) }
-    var logList by remember { mutableStateOf(listOf(">> CONFIGURE HOSTILE ENCOUNTER AND SQUAD...")) }
+    var logList by remember { mutableStateOf(listOf(">> INITIALIZING COMBAT INTERFACE...")) }
 
     LaunchedEffect(Unit) {
         GameState.init(context)
@@ -106,11 +99,7 @@ fun ArenaScreen(
             }
             if (mine.isNotBlank()) {
                 friendsLoaded = withContext(Dispatchers.IO) {
-                    try {
-                        SupabaseService.fetchFriendsForCallsign(mine)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
+                    try { SupabaseService.fetchFriendsForCallsign(mine) } catch (_: Exception) { emptyList() }
                 }
             }
         }
@@ -146,32 +135,14 @@ fun ArenaScreen(
         Triple("SOLAR HAWK", "FIRE", "🦅"),
         Triple("VOID FLYER", "VOID", "🦇")
     )
-    val bossInfo = remember { bossOptions.random() }
-    val isTerritoryBattle = remember { GameState.activeTerritoryBattle != null }
+    val rewardGold = remember(enemyTeamBeasts.size) { 100 + enemyTeamBeasts.size * 25 }
+    val rewardXP = remember(enemyTeamBeasts.size) { 80 + enemyTeamBeasts.size * 20 }
 
-    val rewardGold = remember(enemyTeamBeasts.size, isTerritoryBattle) {
-        val wave = enemyTeamBeasts.size.coerceAtLeast(1)
-        if (isTerritoryBattle) 150 + wave * 20 else 100 + wave * 25 + GameState.playerLevel * 8
-    }
-    val rewardXP = remember(enemyTeamBeasts.size, isTerritoryBattle) {
-        val wave = enemyTeamBeasts.size.coerceAtLeast(1)
-        if (isTerritoryBattle) 250 + wave * 30 else 80 + wave * 20 + GameState.playerLevel * 6
-    }
-
-    val toneGen = remember {
-        try {
-            ToneGenerator(AudioManager.STREAM_MUSIC, 85)
-        } catch (_: Throwable) {
-            null
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose { toneGen?.release() }
-    }
+    val toneGen = remember { try { ToneGenerator(AudioManager.STREAM_MUSIC, 85) } catch (_: Throwable) { null } }
+    DisposableEffect(Unit) { onDispose { toneGen?.release() } }
 
     var playerShakeX by remember { mutableStateOf(0f) }
     var enemyShakeX by remember { mutableStateOf(0f) }
-
     val floatAnim = rememberInfiniteTransition(label = "hover")
     val playerFloatY by floatAnim.animateFloat(
         initialValue = -4f, targetValue = 4f,
@@ -182,83 +153,50 @@ fun ArenaScreen(
         animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Reverse), label = "e_float"
     )
 
-    fun buildEnemyTeam(): List<Beast> {
-        val n = selectedTeamBeasts.size
-        if (n == 0) return emptyList()
-        val lvlBase = GameState.playerLevel + 1
-        return if (opponentMode == OpponentMode.AI) {
-            val pool = bossOptions.shuffled()
-            List(n) { idx ->
-                val pick = pool[idx % pool.size]
-                val lvl = lvlBase + idx / 2
-                val hp = 95 + lvl * 14
-                val territory = GameState.activeTerritoryBattle
-                val name = if (isTerritoryBattle && idx == 0 && territory != null) {
-                    "RIVAL ${territory.callsign.uppercase()}"
-                } else {
-                    "${pick.first} ${idx + 1}"
-                }
-                Beast(
-                    id = 900 + idx,
-                    name = name,
-                    nickname = name,
-                    level = lvl,
-                    xp = 0,
-                    elementType = pick.second,
-                    strength = 10 + lvl * 2,
-                    defense = 6 + lvl,
-                    agility = 8 + lvl,
-                    maxHp = hp,
-                    currentHp = hp
-                )
-            }
-        } else {
-            val tag = friendCallsign.ifBlank { "OPERATIVE" }.uppercase()
-            val elements = listOf("CYBER", "VOID", "FIRE", "ELECTR")
-            List(n) { idx ->
-                val lvl = lvlBase + idx
-                val hp = 100 + lvl * 12
-                Beast(
-                    id = 800 + idx,
-                    name = "HOSTILE $tag-${idx + 1}",
-                    nickname = "HOSTILE $tag-${idx + 1}",
-                    level = lvl,
-                    xp = 0,
-                    elementType = elements[idx % elements.size],
-                    strength = 11 + lvl * 2,
-                    defense = 7 + lvl,
-                    agility = 9 + lvl,
-                    maxHp = hp,
-                    currentHp = hp
-                )
+    // Music simulation
+    LaunchedEffect(phase) {
+        if (phase != ArenaPhase.PRE_MATCH && phase != ArenaPhase.VICTORY && phase != ArenaPhase.DEFEAT) {
+            while (true) {
+                toneGen?.startTone(ToneGenerator.TONE_PROP_PROMPT, 40)
+                delay(3000)
             }
         }
     }
 
     fun startSearchingMatch() {
-        if (opponentMode == OpponentMode.FRIEND && friendCallsign.isBlank()) {
-            logList = listOf(">> ENTER OR PICK A FRIEND CALLSIGN BEFORE DEPLOYING.")
-            return
-        }
         phase = ArenaPhase.SEARCHING
-        logList = listOf(">> SYNCHRONIZING ARENA BEACON...")
+        logList = listOf(">> SCANNING FOR HOSTILE FREQUENCIES...")
         scope.launch {
-            delay(1200)
-            val roster = buildEnemyTeam()
+            delay(1500)
+            val roster = if (opponentMode == OpponentMode.AI) {
+                val pool = bossOptions.shuffled()
+                List(selectedTeamBeasts.size) { idx ->
+                    val pick = pool[idx % pool.size]
+                    val lvl = GameState.playerLevel + 1
+                    val hp = (90..120).random() + lvl * 15
+                    val str = (10..18).random() + lvl
+                    val def = (6..14).random() + lvl
+                    val spd = (8..16).random() + lvl
+                    Beast(900+idx, pick.first, pick.first, lvl, 0, pick.second, str, def, spd, hp, hp)
+                }
+            } else {
+                List(selectedTeamBeasts.size) { idx ->
+                    val lvl = GameState.playerLevel + 1
+                    val hp = (100..130).random() + lvl * 12
+                    val str = (12..20).random() + lvl
+                    val def = (8..16).random() + lvl
+                    val spd = (10..18).random() + lvl
+                    Beast(800+idx, "RIVAL ${friendCallsign.uppercase()}", "RIVAL", lvl, 0, "CYBER", str, def, spd, hp, hp)
+                }
+            }
             enemyTeamBeasts.clear()
             enemyTeamBeasts.addAll(roster)
             enemyHpList.clear()
             enemyMaxHpList.clear()
-            roster.forEach { b ->
-                enemyHpList.add(b.maxHp)
-                enemyMaxHpList.add(b.maxHp)
-            }
+            roster.forEach { b -> enemyHpList.add(b.maxHp); enemyMaxHpList.add(b.maxHp) }
             activeEnemyIndex = 0
-            val label = if (opponentMode == OpponentMode.AI) "AI WAVE" else "FRIEND SQUAD"
-            logList = logList + ">> LINK ESTABLISHED ($label) — ${roster.size} HOSTILE UNITS"
-            delay(900)
-            logList = logList + ">> FIRST CONTACT: ${roster.firstOrNull()?.name ?: "UNKNOWN"}"
-            delay(500)
+            logList = logList + ">> HOSTILE SQUAD DETECTED — ${roster.size} UNITS"
+            delay(800)
             phase = ArenaPhase.PLAYER_TURN
         }
     }
@@ -267,157 +205,63 @@ fun ArenaScreen(
         if (phase != ArenaPhase.PLAYER_TURN) return
         val currentBeast = currentFightingPlayerBeast.value
         val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: return
-        val eIdx = activeEnemyIndex
-        val curEnemyHp = enemyHpList.getOrNull(eIdx) ?: return
+        val curEnemyHp = enemyHpList[activeEnemyIndex]
 
-        toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 85)
+        toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
         scope.launch {
-            for (i in 0..5) {
-                enemyShakeX = if (i % 2 == 0) 10f else -10f
-                delay(40)
-            }
+            for (i in 0..5) { enemyShakeX = if (i % 2 == 0) 8f else -8f; delay(40) }
             enemyShakeX = 0f
         }
 
-        // Element Weakness/Strength Matchup Matrix
-        val attackerElement = currentBeast.elementType.uppercase()
-        val defenderElement = enemy.elementType.uppercase()
-        val multiplier = when {
-            attackerElement == "FIRE" && defenderElement == "CYBER" -> 1.5f
-            attackerElement == "FIRE" && defenderElement == "WATER" -> 0.5f
-            attackerElement == "WATER" && defenderElement == "FIRE" -> 1.5f
-            attackerElement == "WATER" && defenderElement == "ELECTR" -> 0.5f
-            attackerElement == "ELECTR" && defenderElement == "WATER" -> 1.5f
-            attackerElement == "ELECTR" && defenderElement == "EARTH" -> 0.5f
-            attackerElement == "EARTH" && defenderElement == "ELECTR" -> 1.5f
-            attackerElement == "EARTH" && defenderElement == "VOID" -> 0.5f
-            attackerElement == "VOID" && defenderElement == "CYBER" -> 0.75f
-            attackerElement == "VOID" -> 1.25f
-            attackerElement == "CYBER" && defenderElement == "VOID" -> 1.4f
-            else -> 1.0f
-        }
-
-        var finalDmg = 0
-        var moveLog = ""
-        
-        when (skillName) {
-            "CORE SLASH" -> {
-                val baseDmg = 22 + (currentBeast.strength * 1.1).toInt()
-                finalDmg = ((baseDmg - (enemy.defense * 2 / 5)).coerceAtLeast(10) * multiplier).toInt() + (1..6).random()
-                moveLog = ">> ${currentBeast.name} uses CORE SLASH! A cybernetic blade strikes for $finalDmg damage."
-            }
-            "PLASMA BURST" -> {
-                val baseDmg = 30 + (currentBeast.strength * 1.5).toInt()
-                finalDmg = ((baseDmg - (enemy.defense / 2)).coerceAtLeast(14) * multiplier).toInt() + (1..10).random()
-                moveLog = ">> ${currentBeast.name} unleashes PLASMA BURST! Superheated heat rays blast ${enemy.name} for $finalDmg damage."
-                if ((1..4).random() == 1) {
-                    val recoil = (finalDmg * 0.15f).toInt()
-                    val pIdx = activeIndex
-                    val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
-                    val newPh = (curPh - recoil).coerceAtLeast(1)
-                    if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
-                    moveLog += " Recoil backfires for $recoil damage!"
-                }
-            }
-            "SHIELD SHELL" -> {
-                val baseDmg = 12 + (currentBeast.strength * 0.6).toInt()
-                finalDmg = ((baseDmg - (enemy.defense / 3)).coerceAtLeast(6) * multiplier).toInt()
-                val selfHeal = 20 + (currentBeast.defense * 0.5).toInt()
-                val pIdx = activeIndex
-                val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
-                val maxPh = playerMaxHpList.getOrNull(pIdx) ?: currentBeast.maxHp
-                val newPh = (curPh + selfHeal).coerceAtMost(maxPh)
-                if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
-                moveLog = ">> ${currentBeast.name} deploys SHIELD SHELL! Deals $finalDmg dmg, repairs $selfHeal HP."
-            }
-            "TECH REBOOT" -> {
-                val pIdx = activeIndex
-                val curPh = playerHpList.getOrNull(pIdx) ?: currentBeast.maxHp
-                val maxPh = playerMaxHpList.getOrNull(pIdx) ?: currentBeast.maxHp
-                val isLowHp = (curPh.toFloat() / maxPh.toFloat()) <= 0.35f
-                
-                if (isLowHp) {
-                    val baseDmg = 45 + (currentBeast.strength * 2.0).toInt()
-                    finalDmg = ((baseDmg - (enemy.defense / 2)).coerceAtLeast(25) * multiplier).toInt()
-                    moveLog = ">> EMERGENCY OVERCLOCK! ${currentBeast.name} executes TECH REBOOT at low health! CRITICAL BLOW strikes for $finalDmg damage!"
-                } else {
-                    val heal = 35
-                    val newPh = (curPh + heal).coerceAtMost(maxPh)
-                    if (pIdx < playerHpList.size) playerHpList[pIdx] = newPh
-                    finalDmg = 8
-                    moveLog = ">> ${currentBeast.name} activates TECH REBOOT. Restored $heal HP, chips ${enemy.name} for 8 damage."
-                }
-            }
-        }
-
-        if (multiplier > 1.1f) {
-            moveLog += " [ELEMENTAL ADVANTAGE!]"
-        } else if (multiplier < 0.9f) {
-            moveLog += " [ELEMENT RESISTED!]"
-        }
-
-        val newEh = (curEnemyHp - finalDmg).coerceAtLeast(0)
-        if (eIdx < enemyHpList.size) enemyHpList[eIdx] = newEh
-
-        logList = logList + moveLog
+        val baseDmg = (20 + currentBeast.strength * 1.5).toInt()
+        val mitigation = (enemy.defense * 0.9).toInt()
+        val dmg = (baseDmg - mitigation).coerceAtLeast(1) + (1..10).random()
+        val newEh = (curEnemyHp - dmg).coerceAtLeast(0)
+        enemyHpList[activeEnemyIndex] = newEh
+        logList = logList + ">> ${currentBeast.name} uses $skillName! Deals $dmg damage."
 
         if (newEh <= 0) {
-            logList = logList + ">> ${enemy.name} core fainted."
+            logList = logList + ">> ${enemy.name} eliminated."
             if (activeEnemyIndex + 1 < enemyTeamBeasts.size) {
                 activeEnemyIndex++
-                logList = logList + ">> NEXT HOSTILE: ${enemyTeamBeasts[activeEnemyIndex].name}"
                 phase = ArenaPhase.PLAYER_TURN
             } else {
                 phase = ArenaPhase.VICTORY
-                logList = logList + ">> ALL HOSTILE UNITS ELIMINATED. VICTORY CONFIRMED."
+                logList = logList + ">> ARENA CLEARED. MISSION SUCCESS."
             }
-            return
+        } else {
+            phase = ArenaPhase.ENEMY_TURN
         }
-        phase = ArenaPhase.ENEMY_TURN
     }
 
     LaunchedEffect(phase) {
         if (phase == ArenaPhase.ENEMY_TURN) {
-            delay(1200)
+            delay(1500)
             val currentBeast = currentFightingPlayerBeast.value
-            val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: run {
-                phase = ArenaPhase.PLAYER_TURN
-                return@LaunchedEffect
-            }
+            val enemy = enemyTeamBeasts.getOrNull(activeEnemyIndex) ?: return@LaunchedEffect
 
-            toneGen?.startTone(ToneGenerator.TONE_SUP_RADIO_ACK, 95)
+            toneGen?.startTone(ToneGenerator.TONE_SUP_RADIO_ACK, 90)
             scope.launch {
-                for (i in 0..5) {
-                    playerShakeX = if (i % 2 == 0) 10f else -10f
-                    delay(40)
-                }
+                for (i in 0..5) { playerShakeX = if (i % 2 == 0) 8f else -8f; delay(40) }
                 playerShakeX = 0f
             }
 
-            val baseDmg = 22 + (enemy.strength * 1.1).toInt()
-            val dmg = (baseDmg - (currentBeast.defense / 2)).coerceAtLeast(10) + (1..8).random()
+            val baseDmg = (15 + enemy.strength * 1.3).toInt()
+            val mitigation = (currentBeast.defense * 0.9).toInt()
+            val dmg = (baseDmg - mitigation).coerceAtLeast(1) + (1..8).random()
+            val curPh = playerHpList[activeIndex]
+            val newPh = (curPh - dmg).coerceAtLeast(0)
+            playerHpList[activeIndex] = newPh
+            logList = logList + ">> ${enemy.name} strikes! Deals $dmg damage to ${currentBeast.name}."
 
-            val currentHp = playerHpList.getOrElse(activeIndex) { currentBeast.maxHp }
-            val newHp = (currentHp - dmg).coerceAtLeast(0)
-
-            if (activeIndex < playerHpList.size) {
-                playerHpList[activeIndex] = newHp
-            }
-
-            logList = logList + ">> ${enemy.name} strikes ${currentBeast.name}! Deals $dmg damage."
-
-            if (newHp <= 0) {
-                logList = logList + ">> [Slot #${activeIndex + 1}] ${currentBeast.name} core fainted!"
-                GameState.scheduleArenaRecovery(context, currentBeast.id, dmg, currentBeast.maxHp)
-
+            if (newPh <= 0) {
+                logList = logList + ">> ${currentBeast.name} offline."
                 if (activeIndex + 1 < selectedTeamBeasts.size) {
                     activeIndex++
-                    val nextBeast = selectedTeamBeasts[activeIndex]
-                    logList = logList + ">> Deploying [Slot #${activeIndex + 1}] ${nextBeast.name}!"
                     phase = ArenaPhase.PLAYER_TURN
                 } else {
                     phase = ArenaPhase.DEFEAT
-                    logList = logList + ">> All squad units down. DEFEAT RECORDED."
+                    logList = logList + ">> SQUAD WIPED. RETREATING..."
                 }
             } else {
                 phase = ArenaPhase.PLAYER_TURN
@@ -425,620 +269,159 @@ fun ArenaScreen(
         }
     }
 
-    Column(
-        Modifier
+    Box(
+        modifier = Modifier
             .fillMaxSize()
             .background(ObsidianBlack)
+            .drawBehind {
+                drawRect(Brush.verticalGradient(listOf(Color(0xFF05050A), Color(0xFF0F0F1A))))
+                val space = 50.dp.toPx()
+                for (x in 0..(size.width / space).toInt()) {
+                    drawLine(Color.White.copy(0.02f), Offset(x * space, 0f), Offset(x * space, size.height), 1f)
+                }
+                for (y in 0..(size.height / space).toInt()) {
+                    drawLine(Color.White.copy(0.02f), Offset(0f, y * space), Offset(size.width, y * space), 1f)
+                }
+                drawCircle(AppleBlue.copy(0.03f), size.minDimension / 2.5f, center, style = Stroke(2f))
+            }
     ) {
-        // Landscape Fixed Top HUD Header Bar
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(Color.Black.copy(0.4f))
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            TextButton(
-                onClick = onBack,
-                modifier = Modifier.background(Color.White.copy(0.04f), RoundedCornerShape(8.dp)),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-            ) {
-                Text("← Retreat", style = MaterialTheme.typography.labelMedium, color = AppleRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-            }
 
-            Text(
-                "TACTICAL COMBAT ARENA",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.ExtraBold,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                letterSpacing = 1.sp
-            )
 
-            val statusColor = when (phase) {
-                ArenaPhase.PLAYER_TURN -> AppleGreen
-                ArenaPhase.ENEMY_TURN -> AppleRed
-                ArenaPhase.VICTORY -> AppleGreen
-                ArenaPhase.DEFEAT -> AppleRed
-                else -> TextSecondary
-            }
-
+        Column(Modifier.fillMaxSize()) {
+            // HUD Header
             Box(
-                modifier = Modifier
-                    .background(statusColor.copy(0.12f), RoundedCornerShape(6.dp))
-                    .border(0.5.dp, statusColor.copy(0.4f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
             ) {
-                Text(
-                    text = when (phase) {
-                        ArenaPhase.PRE_MATCH -> "PRE-MATCH"
-                        ArenaPhase.SEARCHING -> "CONNECTING"
-                        ArenaPhase.PLAYER_TURN -> "YOUR TURN"
-                        ArenaPhase.ENEMY_TURN -> "ENEMY TURN"
-                        ArenaPhase.VICTORY -> "VICTORY"
-                        ArenaPhase.DEFEAT -> "DEFEAT"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = statusColor,
-                    fontSize = 9.sp
-                )
+                TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { 
+                    Text("← ABORT", color = AppleRed, fontWeight = FontWeight.Bold) 
+                }
             }
-        }
 
-        if (phase == ArenaPhase.PRE_MATCH) {
-            // High-fidelity Squad Selection Dialog
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .width(420.dp)
-                        .background(GlassSurface, RoundedCornerShape(20.dp))
-                        .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(20.dp))
-                        .padding(20.dp)
-                ) {
-                    Text(
-                        "OPPONENT TYPE",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        fontSize = 10.sp
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            if (phase == ArenaPhase.PRE_MATCH) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        Modifier
+                            .width(400.dp)
+                            .background(GlassSurface, RoundedCornerShape(16.dp))
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Button(
-                            onClick = { opponentMode = OpponentMode.AI },
-                            modifier = Modifier.weight(1f).height(40.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (opponentMode == OpponentMode.AI) AppleBlue else GlassSurface,
-                                contentColor = if (opponentMode == OpponentMode.AI) ObsidianBlack else TextSecondary
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("VS AI", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
-                        Button(
-                            onClick = { opponentMode = OpponentMode.FRIEND },
-                            modifier = Modifier.weight(1f).height(40.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (opponentMode == OpponentMode.FRIEND) AppleGreen else GlassSurface,
-                                contentColor = if (opponentMode == OpponentMode.FRIEND) ObsidianBlack else TextSecondary
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("VS FRIEND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
-                    }
-                    if (opponentMode == OpponentMode.FRIEND) {
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = friendCallsign,
-                            onValueChange = { input: String -> friendCallsign = input.uppercase().trim() },
-                            label = { Text("Friend callsign", fontSize = 11.sp) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = AppleGreen,
-                                unfocusedBorderColor = Color.White.copy(0.12f)
-                            )
-                        )
-                        if (friendsLoaded.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text("Tap ally:", fontSize = 9.sp, color = TextSecondary)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                friendsLoaded.take(8).forEach { f ->
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (friendCallsign.equals(f.callsign, true)) AppleGreen.copy(0.25f) else GlassSurface)
-                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(8.dp))
-                                            .clickable { friendCallsign = f.callsign.uppercase() }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text(
-                                            f.callsign,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextPrimary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Text(
-                        "CHOOSE A FIGHTING DEPLOYMENT TEAM",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = TextPrimary,
-                        fontSize = 14.sp
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Pick from your 5 custom tactical squads configured in Teams",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        fontSize = 10.sp
-                    )
-                    Spacer(Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        (0..4).forEach { idx ->
-                            val teamIds = GameState.playerTeams.getOrNull(idx) ?: listOf()
-                            
-                            // Fallback for Team 1: If empty, but the player has captured beasts, automatically default to the first 3!
-                            val finalTeamIds = if (idx == 0 && teamIds.isEmpty() && GameState.capturedBeasts.isNotEmpty()) {
-                                GameState.capturedBeasts.take(3).map { it.id }
-                            } else {
-                                teamIds
-                            }
-                            
-                            val beasts = finalTeamIds.mapNotNull { id -> GameState.capturedBeasts.find { it.id == id } }
-                            val recovering = beasts.any { GameState.isBeastRecovering(it) }
-                            val friendOk = opponentMode == OpponentMode.AI || friendCallsign.isNotBlank()
-                            val isTeamValid = beasts.isNotEmpty() && !recovering && friendOk
-
-                            Button(
-                                onClick = {
-                                    if (isTeamValid) {
-                                        val beasts = finalTeamIds.mapNotNull { id -> GameState.capturedBeasts.find { it.id == id } }
+                        Text("SELECT SQUAD DEPLOYMENT", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            (0..2).forEach { idx ->
+                                val team = GameState.playerTeams.getOrNull(idx) ?: emptyList()
+                                val isValid = team.isNotEmpty() || (idx == 0 && GameState.capturedBeasts.isNotEmpty())
+                                Button(
+                                    onClick = {
+                                        val ids = if (idx == 0 && team.isEmpty()) GameState.capturedBeasts.take(3).map { it.id } else team
+                                        val beasts = ids.mapNotNull { id -> GameState.capturedBeasts.find { it.id == id } }
                                         selectedTeamBeasts.clear()
                                         selectedTeamBeasts.addAll(beasts)
                                         playerHpList.clear()
                                         playerMaxHpList.clear()
-                                        beasts.forEach { beast ->
-                                            playerHpList.add(beast.maxHp)
-                                            playerMaxHpList.add(beast.maxHp)
-                                        }
+                                        beasts.forEach { b -> playerHpList.add(b.maxHp); playerMaxHpList.add(b.maxHp) }
                                         activeIndex = 0
                                         startSearchingMatch()
-                                    }
-                                },
-                                enabled = isTeamValid,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isTeamValid) Color.White.copy(0.05f) else Color.White.copy(0.01f),
-                                    contentColor = if (isTeamValid) AppleBlue else TextTertiary
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(56.dp)
-                                    .border(
-                                        1.dp,
-                                        if (isTeamValid) AppleBlue.copy(0.3f) else Color.White.copy(0.02f),
-                                        RoundedCornerShape(12.dp)
-                                    ),
-                                contentPadding = PaddingValues(4.dp)
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        "TEAM ${idx + 1}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = if (isTeamValid) TextPrimary else TextTertiary
-                                    )
-                                    Text(
-                                        "${finalTeamIds.size} Units",
-                                        fontSize = 8.sp,
-                                        color = if (isTeamValid) AppleGreen else TextTertiary
-                                    )
-                                }
+                                    },
+                                    enabled = isValid,
+                                    modifier = Modifier.weight(1f).height(50.dp)
+                                ) { Text("TEAM ${idx+1}") }
                             }
                         }
                     }
-                    Spacer(Modifier.height(16.dp))
-                    if (opponentMode == OpponentMode.FRIEND && friendCallsign.isBlank()) {
-                        Text(
-                            "Enter a friend callsign (or pick from list) to battle their simulated squad.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AppleOrange,
-                            fontSize = 9.sp
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    Text(
-                        "* Beasts in recovery (after arena faint) cannot deploy. Use Recovery Stim or Nano Repair in the shop.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        fontSize = 8.sp
-                    )
                 }
-            }
-        } else if (phase == ArenaPhase.SEARCHING) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = AppleBlue, strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = "ESTABLISHING SIGNAL COMBAT LINK...",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = AppleBlue,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
+            } else if (phase == ArenaPhase.SEARCHING) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AppleBlue)
                 }
-            }
-        } else {
-            // Split-Screen fixed Landscape battle layout
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // 1. Left Pod (Player Side)
-                Box(
-                    modifier = Modifier
+            } else {
+                // Battle View
+                Row(
+                    Modifier
                         .weight(1f)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(20.dp)
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .graphicsLayer(
-                                translationX = playerShakeX,
-                                translationY = playerFloatY
-                            )
-                    ) {
-                        val activeBeast = currentFightingPlayerBeast.value
-
-                        // Glow base pedestal
+                    // Player Side
+                    Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        val pB = currentFightingPlayerBeast.value
+                        HpBar(pB.name, playerHpList.getOrNull(activeIndex) ?: 0, playerMaxHpList.getOrNull(activeIndex) ?: 1, AppleBlue)
+                        Spacer(Modifier.height(12.dp))
                         Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .background(
-                                    Brush.radialGradient(
-                                        colors = listOf(CyberBlueStart.copy(0.2f), Color.Transparent)
-                                    )
-                                ),
+                            Modifier
+                                .size(90.dp)
+                                .graphicsLayer(translationY = playerFloatY, translationX = playerShakeX),
                             contentAlignment = Alignment.Center
                         ) {
-                            ElementVectorGraphic(
-                                elementType = activeBeast.elementType,
-                                modifier = Modifier.size(64.dp)
-                            )
-                        }
-
-                        // Detailed HP card Pokemon-style
-                        GlassCard(
-                            modifier = Modifier.width(180.dp),
-                            border = BorderStroke(1.dp, AppleBlue.copy(0.2f))
-                        ) {
-                            Column(modifier = Modifier.padding(6.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        activeBeast.name,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 10.sp,
-                                        color = TextPrimary
-                                    )
-                                    Text(
-                                        "LVL ${activeBeast.level}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 8.sp,
-                                        color = AppleBlue
-                                    )
-                                }
-
-                                val hp = playerHpList.getOrNull(activeIndex) ?: 100
-                                val max = playerMaxHpList.getOrNull(activeIndex) ?: 100
-                                val ratio = (hp.toFloat() / max.toFloat()).coerceIn(0f, 1f)
-                                val hpBarCol = when {
-                                    ratio > 0.5f -> AppleGreen
-                                    ratio > 0.2f -> AppleOrange
-                                    else -> AppleRed
-                                }
-
-                                Spacer(Modifier.height(4.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    // Pokemon-style squad dots
-                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        selectedTeamBeasts.forEachIndexed { i, _ ->
-                                            val currentHp = playerHpList.getOrNull(i) ?: 0
-                                            val dotCol = if (currentHp <= 0) AppleRed else AppleGreen
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(5.dp)
-                                                    .clip(CircleShape)
-                                                    .background(dotCol)
-                                            )
-                                        }
-                                    }
-                                    Text("$hp/$max HP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = hpBarCol)
-                                }
-                                Spacer(Modifier.height(3.dp))
-                                AnimatedHpRatioBar(ratio = ratio, fillColor = hpBarCol)
-                            }
+                            Text(IconUtils.getAnimalIcon(pB.name), fontSize = 64.sp)
                         }
                     }
-                }
 
-                // 2. Right Pod (Enemy Side)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .graphicsLayer(
-                                translationX = enemyShakeX,
-                                translationY = enemyFloatY
-                            )
-                    ) {
+                    // Enemy Side
+                    Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         val eB = currentEnemyBeast.value
-                        val eHp = enemyHpList.getOrNull(activeEnemyIndex) ?: 0
-                        val eMax = enemyMaxHpList.getOrNull(activeEnemyIndex) ?: 1
-
-                        // Glow base pedestal
+                        HpBar(eB.name, enemyHpList.getOrNull(activeEnemyIndex) ?: 0, enemyMaxHpList.getOrNull(activeEnemyIndex) ?: 1, AppleRed)
+                        Spacer(Modifier.height(12.dp))
                         Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .background(
-                                    Brush.radialGradient(
-                                        colors = listOf(CyberBlueEnd.copy(0.2f), Color.Transparent)
-                                    )
-                                ),
+                            Modifier
+                                .size(90.dp)
+                                .graphicsLayer(translationY = enemyFloatY, translationX = enemyShakeX),
                             contentAlignment = Alignment.Center
                         ) {
-                            ElementVectorGraphic(
-                                elementType = eB.elementType,
-                                modifier = Modifier.size(64.dp)
-                            )
-                        }
-
-                        // Detailed HP Card
-                        GlassCard(
-                            modifier = Modifier.width(180.dp),
-                            border = BorderStroke(1.dp, AppleRed.copy(0.2f))
-                        ) {
-                            Column(modifier = Modifier.padding(6.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        currentEnemyBeast.value.name,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 10.sp,
-                                        color = TextPrimary
-                                    )
-                                    Text(
-                                        "LVL ${currentEnemyBeast.value.level}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 8.sp,
-                                        color = AppleRed
-                                    )
-                                }
-
-                                val ratio = (eHp.toFloat() / eMax.toFloat()).coerceIn(0f, 1f)
-                                val hpBarCol = when {
-                                    ratio > 0.5f -> AppleGreen
-                                    ratio > 0.2f -> AppleOrange
-                                    else -> AppleRed
-                                }
-
-                                Spacer(Modifier.height(4.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("HOSTILE ${activeEnemyIndex + 1}/${enemyTeamBeasts.size}", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = AppleRed)
-                                    Text("$eHp/$eMax HP", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = hpBarCol)
-                                }
-                                Spacer(Modifier.height(3.dp))
-                                AnimatedHpRatioBar(ratio = ratio, fillColor = hpBarCol)
-                            }
+                            Text(IconUtils.getAnimalIcon(eB.name), fontSize = 64.sp)
                         }
                     }
                 }
-            }
 
-            // 3. Landscape Bottom Splitscreen Controller Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(115.dp)
-                    .background(Color.Black.copy(0.3f))
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Left Terminal scrolling combat logs
-                GlassCard(
-                    modifier = Modifier
-                        .weight(0.6f)
-                        .fillMaxHeight()
+                // Bottom Console
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .background(Color.Black.copy(0.4f))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(4.dp)
+                    Box(
+                        Modifier
+                            .weight(0.6f)
+                            .fillMaxHeight()
+                            .background(Color.Black.copy(0.3f), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
                     ) {
-                        logList.takeLast(5).forEach { line ->
-                            val lineCol = when {
-                                line.contains("VICTORY") || line.contains("ALL HOSTILE") -> AppleGreen
-                                line.contains("DEFEAT") || line.contains("ERROR") -> AppleRed
-                                line.contains("ELEMENTAL ADVANTAGE") -> Color(0xFF30D158)
-                                line.contains("ELEMENT RESISTED") -> Color(0xFFFF9F0A)
-                                line.contains("EMERGENCY OVERCLOCK") || line.contains("CRITICAL") -> Color(0xFFBF5AF2)
-                                line.contains("Recoil") -> AppleOrange
-                                line.contains("strikes") || line.contains("HOSTILE") -> Color(0xFFFF6B6B)
-                                line.contains("CORE SLASH") -> AppleBlue
-                                line.contains("PLASMA BURST") -> AppleOrange
-                                line.contains("SHIELD SHELL") -> AppleGreen
-                                line.contains("TECH REBOOT") || line.contains("repairs") || line.contains("Restored") -> Color(0xFFBF5AF2)
-                                line.contains("fainted") -> AppleRed
-                                else -> TextSecondary
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            logList.takeLast(10).forEach {
+                                Text(it, color = TextSecondary, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                             }
-                            Text(
-                                text = line,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = lineCol,
-                                modifier = Modifier.padding(vertical = 1.dp)
-                            )
                         }
                     }
-                }
-
-                // Right Command menu inputs
-                Box(
-                    modifier = Modifier
-                        .weight(0.4f)
-                        .fillMaxHeight()
-                ) {
-                    if (phase == ArenaPhase.PLAYER_TURN) {
-                        val moveSlots = arenaMoveSlots
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                moveSlots.take(2).forEach { slot ->
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(slot.color.copy(0.1f))
-                                            .border(1.dp, slot.color.copy(0.4f), RoundedCornerShape(8.dp))
-                                            .clickable { playerExecuteAttack(slot.name) },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(slot.icon, fontSize = 14.sp)
-                                            Text(slot.name, fontWeight = FontWeight.ExtraBold, fontSize = 7.5.sp, color = slot.color, textAlign = TextAlign.Center)
-                                            Text(slot.desc, fontSize = 6.sp, color = TextSecondary, textAlign = TextAlign.Center)
-                                        }
+                    Box(Modifier.weight(0.4f)) {
+                        if (phase == ArenaPhase.PLAYER_TURN) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    arenaMoveSlots.take(2).forEach { slot ->
+                                        MoveBtn(slot, Modifier.weight(1f)) { playerExecuteAttack(slot.name) }
+                                    }
+                                }
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    arenaMoveSlots.takeLast(2).forEach { slot ->
+                                        MoveBtn(slot, Modifier.weight(1f)) { playerExecuteAttack(slot.name) }
                                     }
                                 }
                             }
-                            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                moveSlots.takeLast(2).forEach { slot ->
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(slot.color.copy(0.1f))
-                                            .border(1.dp, slot.color.copy(0.4f), RoundedCornerShape(8.dp))
-                                            .clickable { playerExecuteAttack(slot.name) },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(slot.icon, fontSize = 14.sp)
-                                            Text(slot.name, fontWeight = FontWeight.ExtraBold, fontSize = 7.5.sp, color = slot.color, textAlign = TextAlign.Center)
-                                            Text(slot.desc, fontSize = 6.sp, color = TextSecondary, textAlign = TextAlign.Center)
-                                        }
-                                    }
-                                }
+                        } else if (phase == ArenaPhase.VICTORY || phase == ArenaPhase.DEFEAT) {
+                            Button(
+                                onClick = {
+                                    if (phase == ArenaPhase.VICTORY) GameState.addXPAndGold(context, rewardXP, rewardGold)
+                                    onBack()
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Text(if (phase == ArenaPhase.VICTORY) "CLAIM REWARDS" else "RETREAT")
                             }
-                        }
-                    } else if (phase == ArenaPhase.VICTORY || phase == ArenaPhase.DEFEAT) {
-                        val win = phase == ArenaPhase.VICTORY
-                        Button(
-                            onClick = {
-                                if (win) {
-                                    GameState.addXPAndGold(context, rewardXP, rewardGold)
-                                    if (isTerritoryBattle) {
-                                        val battle = GameState.activeTerritoryBattle
-                                        if (battle != null) {
-                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                                try {
-                                                    val myCall = GameState.callsign.ifBlank {
-                                                        val prefs = context.getSharedPreferences("zoodex_save", Context.MODE_PRIVATE)
-                                                        prefs.getString("callsign", "") ?: ""
-                                                    }
-                                                    com.Sufi.zoodex.data.SupabaseService.saveTerritoryClaim(
-                                                        callsign = myCall,
-                                                        lat = battle.lat,
-                                                        lng = battle.lng,
-                                                        radius = battle.radius,
-                                                        faction = GameState.faction
-                                                    )
-                                                } catch (e: Exception) {
-                                                    Log.e("ArenaScreen", "Error saving captured territory: ${e.message}")
-                                                }
-                                            }
-                                        }
-                                        GameState.activeTerritoryBattle = null
-                                    }
-                                }
-                                onBack()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (win) AppleGreen else AppleRed, contentColor = ObsidianBlack),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                        ) {
-                            Text(
-                                text = if (win) "Claim Victory: +$rewardGold Coins 🪙" else "Retreat back to Hub",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = ObsidianBlack,
-                                fontSize = 11.sp
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(GlassSurface, RoundedCornerShape(8.dp))
-                                .border(0.5.dp, Color.White.copy(0.08f), RoundedCornerShape(8.dp))
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "RIVAL ACTION INBOUND...",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = AppleRed,
-                                fontSize = 10.sp
-                            )
                         }
                     }
                 }
@@ -1048,27 +431,43 @@ fun ArenaScreen(
 }
 
 @Composable
-private fun AnimatedHpRatioBar(
-    ratio: Float,
-    fillColor: Color,
-    trackColor: Color = Color.White.copy(0.08f)
-) {
-    val animated by animateFloatAsState(
-        targetValue = ratio.coerceIn(0f, 1f),
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "hpbar"
-    )
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .background(trackColor, RoundedCornerShape(3.dp))
-    ) {
+private fun HpBar(name: String, hp: Int, max: Int, color: Color) {
+    val fraction = if (max > 0) (hp.toFloat() / max.toFloat()).coerceIn(0f, 1f) else 0f
+    Column(Modifier.width(160.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(name, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 10.sp)
+            Text("$hp/$max", color = color, fontSize = 10.sp)
+        }
+        Spacer(Modifier.height(4.dp))
         Box(
-            modifier = Modifier
-                .fillMaxWidth(animated)
-                .fillMaxHeight()
-                .background(fillColor, RoundedCornerShape(3.dp))
-        )
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .background(Color.White.copy(0.1f), CircleShape),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(color, CircleShape)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.MoveBtn(move: MoveSlot, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxHeight(),
+        color = move.color.copy(0.15f),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, move.color.copy(0.4f))
+    ) {
+        Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text(move.icon, fontSize = 16.sp)
+            Text(move.name, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, color = move.color)
+        }
     }
 }

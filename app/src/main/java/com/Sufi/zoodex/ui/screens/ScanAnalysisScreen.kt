@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.data.AnimalDatabase
 import com.Sufi.zoodex.data.AnimalScanDetector
+import com.Sufi.zoodex.util.IconUtils
 import com.Sufi.zoodex.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -74,24 +75,29 @@ fun ScanAnalysisScreen(
         }
         
         try {
-            val (ids, headline) = withContext(Dispatchers.Default) {
-                AnimalScanDetector.analyze(capturedBitmap)
+            val (ids, headline, isMatchFound) = withContext(Dispatchers.Default) {
+                AnimalScanDetector.analyzeStrict(capturedBitmap)
             }
             analyzedAnimals = ids
             detectedLabel = headline
-            confidence = 0.98f
+            confidence = if (isMatchFound) 0.98f else 0.65f
             
-            telemetryLogs.add(">> CLASSIFICATION SUCCESS: BIO-MATCH DETECTED!")
-            telemetryLogs.add(">> TOP SIGNAL: ${headline.uppercase()} — ELEMENT VECTORS CORRELATED.")
-            analysisMessage = "Bio-match confirmed: $headline"
+            if (isMatchFound) {
+                telemetryLogs.add(">> CLASSIFICATION SUCCESS: BIO-MATCH DETECTED!")
+                telemetryLogs.add(">> TOP SIGNAL: ${headline.uppercase()} — ELEMENT VECTORS CORRELATED.")
+                analysisMessage = "Bio-match confirmed: $headline"
+            } else {
+                telemetryLogs.add(">> CLASSIFICATION REJECTED: UNKNOWN SPECIMEN.")
+                telemetryLogs.add(">> SIGNAL DETECTED: ${headline.uppercase()} — NO ENCYCLOPEDIA ENTRY FOUND.")
+                analysisMessage = "UNKNOWN BIO-SIGNAL: $headline"
+            }
         } catch (e: Exception) {
             Log.e("ScanAnalysisScreen", "Real scan failed: ${e.message}", e)
-            analyzedAnimals = listOf(3)
-            detectedLabel = "SCAN_RECOVERY"
-            confidence = 0.5f
-            telemetryLogs.add(">> ERROR: Direct match degraded. Accessing starter genomes...")
-            telemetryLogs.add(">> RETRACTED PROFILE: STRAY DOG RECOVERY PROFILE.")
-            analysisMessage = "Using recovery detection profile."
+            analyzedAnimals = emptyList()
+            detectedLabel = "SCAN_ERROR"
+            confidence = 0.2f
+            telemetryLogs.add(">> ERROR: Bio-scan processing failure.")
+            analysisMessage = "Bio-scan failed to initialize properly."
         } finally {
             isAnalyzing = false
         }
@@ -363,7 +369,10 @@ fun AnimalMatchCard(animal: com.Sufi.zoodex.data.AnimalData, onCapture: () -> Un
                         .border(2.dp, elementColor, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(animal.iconUrl, fontSize = 24.sp)
+                    Text(
+                        text = IconUtils.getAnimalIcon(animal.name),
+                        fontSize = 28.sp
+                    )
                 }
 
                 // Animal Info

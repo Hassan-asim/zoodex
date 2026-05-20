@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
 import com.Sufi.zoodex.data.AnimalDatabase
 import com.Sufi.zoodex.data.GameState
+import com.Sufi.zoodex.util.IconUtils
 import com.Sufi.zoodex.ui.theme.*
 
 private val elementMetaData = mapOf(
@@ -54,7 +55,8 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
     )
     val isCaptured = capturedBeast != null
 
-    val (emoji, elementColor) = elementMetaData[beast.elementType] ?: Pair("❓", TextSecondary)
+    val animalIcon = IconUtils.getAnimalIcon(beast.name)
+    val elementColor = elementMetaData[beast.elementType]?.second ?: TextSecondary
     
     // Local dynamic trigger to refresh Compose layouts on stat spend
     var updateTrigger by remember { mutableIntStateOf(0) }
@@ -79,9 +81,9 @@ fun BeastDetailScreen(beastId: Int, onBack: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Big Animated Avatar emoji
+                    // Big Animated Avatar Icon
                     Text(
-                        text = emoji,
+                        text = animalIcon,
                         fontSize = 72.sp,
                         modifier = Modifier.padding(top = 8.dp)
                     )

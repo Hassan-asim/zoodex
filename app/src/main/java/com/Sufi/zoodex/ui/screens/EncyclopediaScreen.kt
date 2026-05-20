@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.Sufi.zoodex.data.Beast
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.data.AnimalDatabase
+import com.Sufi.zoodex.util.IconUtils
 import com.Sufi.zoodex.ui.theme.*
 
 private val elementColors = mapOf(
@@ -241,7 +242,10 @@ fun AnimalEncyclopediaCard(
                         .border(1.dp, elemColor.copy(0.4f), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(animal.iconUrl, fontSize = 20.sp)
+                    Text(
+                        text = IconUtils.getAnimalIcon(animal.name),
+                        fontSize = 20.sp
+                    )
                 }
 
                 Spacer(Modifier.height(6.dp))

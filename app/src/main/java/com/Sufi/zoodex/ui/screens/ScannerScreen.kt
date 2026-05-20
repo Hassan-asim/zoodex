@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.Sufi.zoodex.data.GameState
 import com.Sufi.zoodex.ui.theme.*
+import com.Sufi.zoodex.util.GalleryUtils
 import kotlinx.coroutines.delay
 import java.io.File
 import java.util.concurrent.Executors
@@ -206,6 +207,7 @@ fun CameraScannerView(
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
                     if (bitmap != null) {
+                        GalleryUtils.saveImageToGallery(context, bitmap, "zoodex_scan_${System.currentTimeMillis()}.jpg")
                         onCaptured(bitmap)
                     } else {
                         Log.e("CameraScannerView", "Decoded bitmap is null from ${photoFile.absolutePath}")

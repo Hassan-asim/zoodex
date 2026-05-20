@@ -17,6 +17,7 @@ supabase = "2.1.4"
 postgrestKt = "0.3.0"
 realtimeKt = "0.3.1"
 gotrue = "0.4.1"
+materialIconsExtended = "1.6.7"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -42,6 +43,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 supabase-postgrest = { group = "io.github.supabase", name = "postgrest-kt", version.ref = "supabase" }
 supabase-realtime = { group = "io.github.supabase", name = "realtime-kt", version.ref = "supabase" }
 supabase-gotrue = { group = "io.github.supabase", name = "gotrue-kt", version.ref = "supabase" }
+androidx-compose-material-iconsExtended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
