@@ -343,7 +343,7 @@ fun ArenaScreen(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(20.dp)
+                        .padding(horizontal = 20.dp, vertical = 4.dp)
                 ) {
                     // Player Side
                     Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -377,51 +377,28 @@ fun ArenaScreen(
                 }
 
                 // Bottom Console
-                Row(
+                Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
+                        .height(80.dp)
                         .background(Color.Black.copy(0.4f))
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(8.dp)
                 ) {
-                    Box(
-                        Modifier
-                            .weight(0.6f)
-                            .fillMaxHeight()
-                            .background(Color.Black.copy(0.3f), RoundedCornerShape(8.dp))
-                            .padding(8.dp)
-                    ) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            logList.takeLast(10).forEach {
-                                Text(it, color = TextSecondary, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    if (phase == ArenaPhase.PLAYER_TURN) {
+                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            arenaMoveSlots.forEach { slot ->
+                                MoveBtn(slot, Modifier.weight(1f)) { playerExecuteAttack(slot.name) }
                             }
                         }
-                    }
-                    Box(Modifier.weight(0.4f)) {
-                        if (phase == ArenaPhase.PLAYER_TURN) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    arenaMoveSlots.take(2).forEach { slot ->
-                                        MoveBtn(slot, Modifier.weight(1f)) { playerExecuteAttack(slot.name) }
-                                    }
-                                }
-                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    arenaMoveSlots.takeLast(2).forEach { slot ->
-                                        MoveBtn(slot, Modifier.weight(1f)) { playerExecuteAttack(slot.name) }
-                                    }
-                                }
-                            }
-                        } else if (phase == ArenaPhase.VICTORY || phase == ArenaPhase.DEFEAT) {
-                            Button(
-                                onClick = {
-                                    if (phase == ArenaPhase.VICTORY) GameState.addXPAndGold(context, rewardXP, rewardGold)
-                                    onBack()
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                Text(if (phase == ArenaPhase.VICTORY) "CLAIM REWARDS" else "RETREAT")
-                            }
+                    } else if (phase == ArenaPhase.VICTORY || phase == ArenaPhase.DEFEAT) {
+                        Button(
+                            onClick = {
+                                if (phase == ArenaPhase.VICTORY) GameState.addXPAndGold(context, rewardXP, rewardGold)
+                                onBack()
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Text(if (phase == ArenaPhase.VICTORY) "CLAIM REWARDS" else "RETREAT")
                         }
                     }
                 }
